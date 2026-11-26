@@ -25,6 +25,12 @@ class MainActivity : Activity() {
     private lateinit var urlInput: EditText
     private lateinit var pinInput: EditText
     private val handler = Handler(Looper.getMainLooper())
+    // Thème sombre : toujours actif
+    private val dark = true
+    private fun dialog() = AlertDialog.Builder(
+        this,
+        if (dark) AlertDialog.THEME_DEVICE_DEFAULT_DARK else AlertDialog.THEME_DEVICE_DEFAULT_LIGHT
+    )
     private val prefs by lazy { getSharedPreferences("wol", Context.MODE_PRIVATE) }
 
     private val poll = object : Runnable {
@@ -43,12 +49,12 @@ class MainActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
             setPadding(px(28), px(28), px(28), px(28))
-            setBackgroundColor(Color.parseColor("#F5F5F4"))
+            setBackgroundColor(Color.parseColor(if (dark) "#1C1917" else "#F5F5F4"))
         }
 
         root.addView(TextView(this).apply {
             text = "Mon PC"; textSize = 28f; gravity = Gravity.CENTER
-            setTextColor(Color.parseColor("#1C1917"))
+            setTextColor(Color.parseColor(if (dark) "#FAFAF9" else "#1C1917"))
         })
         status = TextView(this).apply {
             text = "Vérification…"; textSize = 16f; gravity = Gravity.CENTER
@@ -57,21 +63,25 @@ class MainActivity : Activity() {
         root.addView(status)
         game = TextView(this).apply {
             text = "Chroniques : …"; textSize = 15f; gravity = Gravity.CENTER
-            setTextColor(Color.parseColor("#7C3AED"))
+            setTextColor(Color.parseColor(if (dark) "#A78BFA" else "#7C3AED"))
             setPadding(0, 0, 0, px(14))
         }
         root.addView(game)
 
         urlInput = EditText(this).apply {
             hint = "Serveur (ex : http://100.64.0.5:8080)"
-            setText(prefs.getString("url", ""))
+            setText(prefs.getString("url", "http://100.124.61.8:8080"))
             inputType = InputType.TYPE_TEXT_VARIATION_URI
             setSingleLine()
+            setTextColor(Color.parseColor(if (dark) "#FAFAF9" else "#1C1917"))
+            setHintTextColor(Color.parseColor(if (dark) "#A8A29E" else "#78716C"))
         }
         pinInput = EditText(this).apply {
             hint = "Code PIN"
             setText(prefs.getString("pin", "395474"))
             inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD
+            setTextColor(Color.parseColor(if (dark) "#FAFAF9" else "#1C1917"))
+            setHintTextColor(Color.parseColor(if (dark) "#A8A29E" else "#78716C"))
         }
         root.addView(urlInput)
         root.addView(pinInput)
@@ -87,7 +97,7 @@ class MainActivity : Activity() {
         }
         root.addView(bigButton("⏻  Allumer", "#16A34A") { act("/wake") })
         root.addView(bigButton("Éteindre", "#DC2626") {
-            AlertDialog.Builder(this)
+            dialog()
                 .setMessage("Éteindre le PC ?")
                 .setPositiveButton("Éteindre") { _, _ -> act("/shutdown") }
                 .setNegativeButton("Annuler", null)
@@ -96,7 +106,7 @@ class MainActivity : Activity() {
 
         root.addView(bigButton("Lancer Chroniques", "#7C3AED") { act("/game/start") })
         root.addView(bigButton("Arrêter Chroniques", "#52525B") {
-            AlertDialog.Builder(this)
+            dialog()
                 .setMessage("Arrêter le serveur Chroniques ?")
                 .setPositiveButton("Arrêter") { _, _ -> act("/game/stop") }
                 .setNegativeButton("Annuler", null)
@@ -109,6 +119,10 @@ class MainActivity : Activity() {
         }
         root.addView(msg)
         setContentView(root)
+        if (dark) {
+            window.statusBarColor = Color.parseColor("#1C1917")
+            window.navigationBarColor = Color.parseColor("#1C1917")
+        }
     }
 
     override fun onResume() { super.onResume(); handler.post(poll) }
