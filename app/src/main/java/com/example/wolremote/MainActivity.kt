@@ -21,6 +21,7 @@ import kotlin.concurrent.thread
 class MainActivity : Activity() {
     private lateinit var status: TextView
     private lateinit var msg: TextView
+    private lateinit var game: TextView
     private lateinit var urlInput: EditText
     private lateinit var pinInput: EditText
     private val handler = Handler(Looper.getMainLooper())
@@ -54,6 +55,12 @@ class MainActivity : Activity() {
             setPadding(0, px(6), 0, px(24))
         }
         root.addView(status)
+        game = TextView(this).apply {
+            text = "Chroniques : …"; textSize = 15f; gravity = Gravity.CENTER
+            setTextColor(Color.parseColor("#7C3AED"))
+            setPadding(0, 0, 0, px(14))
+        }
+        root.addView(game)
 
         urlInput = EditText(this).apply {
             hint = "Serveur (ex : http://100.64.0.5:8080)"
@@ -83,6 +90,15 @@ class MainActivity : Activity() {
             AlertDialog.Builder(this)
                 .setMessage("Éteindre le PC ?")
                 .setPositiveButton("Éteindre") { _, _ -> act("/shutdown") }
+                .setNegativeButton("Annuler", null)
+                .show()
+        })
+
+        root.addView(bigButton("Lancer Chroniques", "#7C3AED") { act("/game/start") })
+        root.addView(bigButton("Arrêter Chroniques", "#52525B") {
+            AlertDialog.Builder(this)
+                .setMessage("Arrêter le serveur Chroniques ?")
+                .setPositiveButton("Arrêter") { _, _ -> act("/game/stop") }
                 .setNegativeButton("Annuler", null)
                 .show()
         })
@@ -126,6 +142,8 @@ class MainActivity : Activity() {
                     status.text = if (online) "● Allumé" else "● Éteint"
                     status.setTextColor(Color.parseColor(if (online) "#16A34A" else "#DC2626"))
                 }
+                val running = try { request("/game/status", false).getBoolean("running") } catch (e: Exception) { false }
+                runOnUiThread { game.text = if (running) "Chroniques : en cours" else "Chroniques : arrêté" }
             } catch (e: Exception) {
                 runOnUiThread {
                     status.text = "Serveur injoignable"
