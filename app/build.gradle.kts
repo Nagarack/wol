@@ -18,4 +18,19 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     kotlinOptions { jvmTarget = "17" }
+
+    // Clé de signature fixe : les mises à jour s'installent par-dessus, sans désinstaller.
+    signingConfigs {
+        create("fixed") {
+            storeFile = file("mon-pc.keystore")
+            storePassword = "monpcstore"
+            keyAlias = "monpc"
+            keyPassword = "monpcstore"
+        }
+    }
+    buildTypes {
+        getByName("debug") {
+            signingConfig = signingConfigs.getByName("fixed")
+        }
+    }
 }
