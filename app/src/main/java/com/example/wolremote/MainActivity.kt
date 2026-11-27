@@ -24,6 +24,11 @@ class MainActivity : Activity() {
     private lateinit var game: TextView
     private lateinit var msg: TextView
     private lateinit var vac: TextView
+    private lateinit var bWake: Button
+    private lateinit var bOff: Button
+    private lateinit var bRestart: Button
+    private lateinit var bStart: Button
+    private lateinit var bStop: Button
     private lateinit var queue: QueueTab
     private lateinit var qb: QbTab
     private lateinit var media: MediaTab
@@ -142,10 +147,11 @@ class MainActivity : Activity() {
         updater.check()
         if (st.get("kWatch") == "1" && st.get("kVac") != "1") WatchService.start(this)
     }
-    override fun onPause() { super.onPause(); handler.removeCallbacks(poll) }
+    override fun onPause() { super.onPause(); handler.removeCallbacks(poll); settingsTab.persist() }
 
     private fun show(i: Int) {
         hideKeyboard()
+        if (current == 5 && i != 5) settingsTab.persist()
         val changed = i != current
         current = i
         for ((k, v) in views.withIndex()) v.visibility = if (k == i) View.VISIBLE else View.GONE
@@ -211,33 +217,36 @@ class MainActivity : Activity() {
         hero.addView(status)
         hero.addView(game)
         col.addView(hero)
+        msg = tv("", 14f, Pal.FG)
+        msg.gravity = Gravity.CENTER
+        msg.setPadding(0, dp(10), 0, 0)
+        col.addView(msg)
         col.addView(power.view)
 
         col.addView(section("Ordinateur"))
-        col.addView(pair(
-            btn("Allumer", Pal.GREEN, 72) { act("/wake") },
-            btn2("Éteindre", Pal.RED, 72) {
-                dialogBuilder().setMessage("Éteindre le PC ?")
-                    .setPositiveButton("Éteindre") { _, _ -> act("/shutdown") }
-                    .setNegativeButton("Annuler", null).show()
-            }
-        ))
+        bWake = btn("Allumer", Pal.GREEN, 72) { act("/wake") }
+        bOff = btn2("Éteindre", Pal.RED, 72) {
+            dialogBuilder().setMessage("Éteindre le PC ?")
+                .setPositiveButton("Éteindre") { _, _ -> act("/shutdown") }
+                .setNegativeButton("Annuler", null).show()
+        }
+        col.addView(pair(bWake, bOff))
 
-        col.addView(btn2("Redémarrer", Pal.FG, 56) {
+        bRestart = btn2("Redémarrer", Pal.FG, 56) {
             dialogBuilder().setMessage("Redémarrer le PC ? Il se reconnectera tout seul.")
                 .setPositiveButton("Redémarrer") { _, _ -> act("/restart") }
                 .setNegativeButton("Annuler", null).show()
-        })
+        }
+        col.addView(bRestart)
 
         col.addView(section("Chroniques"))
-        col.addView(pair(
-            btn2("Lancer", Pal.FG, 72) { act("/game/start") },
-            btn2("Arrêter", Pal.RED, 72) {
-                dialogBuilder().setMessage("Arrêter le serveur Chroniques ?")
-                    .setPositiveButton("Arrêter") { _, _ -> act("/game/stop") }
-                    .setNegativeButton("Annuler", null).show()
-            }
-        ))
+        bStart = btn2("Lancer", Pal.FG, 72) { act("/game/start") }
+        bStop = btn2("Arrêter", Pal.RED, 72) {
+            dialogBuilder().setMessage("Arrêter le serveur Chroniques ?")
+                .setPositiveButton("Arrêter") { _, _ -> act("/game/stop") }
+                .setNegativeButton("Annuler", null).show()
+        }
+        col.addView(pair(bStart, bStop))
 
         col.addView(section("Jellyfin"))
         col.addView(btn2("Actualiser la bibliothèque", Pal.FG, 56) {
@@ -248,10 +257,6 @@ class MainActivity : Activity() {
             }
         })
 
-        msg = tv("", 14f, Pal.MUTED)
-        msg.gravity = Gravity.CENTER
-        msg.setPadding(0, dp(18), 0, 0)
-        col.addView(msg)
         return sv
     }
 
@@ -270,6 +275,12 @@ class MainActivity : Activity() {
                     status.setTextColor(if (online) Pal.GREEN else Pal.RED)
                     game.text = if (running) "Chroniques allumé" else "Chroniques éteint"
                     game.setTextColor(if (running) Pal.GREEN else Pal.RED)
+                    // Seuls les boutons utiles sont actifs : on ne peut pas allumer un PC allumé
+                    avail(bWake, !online)
+                    avail(bOff, online)
+                    avail(bRestart, online)
+                    avail(bStart, online && !running)
+                    avail(bStop, running)
                 }
             } catch (e: Exception) {
                 runOnUiThread {
@@ -278,9 +289,15 @@ class MainActivity : Activity() {
                     status.setTextColor(Pal.MUTED)
                     game.text = "Chroniques …"
                     game.setTextColor(Pal.MUTED)
+                    for (b in listOf(bWake, bOff, bRestart, bStart, bStop)) avail(b, true)
                 }
             }
         }
+    }
+
+    private fun avail(b: Button, on: Boolean) {
+        b.isEnabled = on
+        b.alpha = if (on) 1f else 0.35f
     }
 
     private fun act(path: String) {
@@ -296,6 +313,8 @@ class MainActivity : Activity() {
             runOnUiThread { msg.text = text }
             Thread.sleep(2000)
             runOnUiThread { refreshPc() }
+            Thread.sleep(6000)
+            runOnUiThread { if (msg.text == text) msg.text = "" }
         }
     }
 }

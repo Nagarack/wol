@@ -27,28 +27,28 @@ class MediaTab(private val a: Activity, private val st: Settings) {
         col.addView(a.title("Média"))
         col.addView(a.section("En lecture"))
         col.addView(nowCard)
-        col.addView(a.btn("Actualiser la bibliothèque", Pal.BLUE, 52) {
+        col.addView(a.btn2("Actualiser la bibliothèque", Pal.FG, 52) {
             info.text = "…"
             thread {
                 val t = Jellyfin.refresh(st)
                 a.runOnUiThread { info.text = t }
             }
         })
+        info.setPadding(0, a.dp(8), 0, 0)
+        col.addView(info)
         col.addView(a.section("Ajouts récents"))
         recentBox.orientation = LinearLayout.VERTICAL
         col.addView(recentBox)
-        info.setPadding(0, a.dp(10), 0, 0)
-        col.addView(info)
-        col.addView(a.section("Bibliothèque"))
-        col.addView(a.btn2("Stockage et gros contenus") { LibraryUi.storage(a, st) })
-        col.addView(a.btn2("Sous-titres français manquants") { LibraryUi.subtitles(a, st) })
-        col.addView(a.btn2("Suivi des séries") { LibraryUi2.follow(a, st) })
-        col.addView(a.btn2("Que regarder ce soir") { LibraryUi3.tonight(a, st) })
-        col.addView(a.btn2("Nettoyage des films déjà vus") { LibraryUi3.cleanup(a, st) })
-        col.addView(a.btn2("Qualité et doublons") { LibraryUi2.quality(a, st) })
+        col.addView(a.section("Outils de bibliothèque"))
+        col.addView(a.rowItem("Que regarder ce soir", "Films non vus, tirés au hasard") { LibraryUi3.tonight(a, st) })
+        col.addView(a.rowItem("Suivi des séries", "Prochains épisodes, recherche des manquants") { LibraryUi2.follow(a, st) })
+        col.addView(a.rowItem("Stockage", "Espace libre et plus gros contenus") { LibraryUi.storage(a, st) })
+        col.addView(a.rowItem("Nettoyage", "Films vus depuis plus de 3 mois") { LibraryUi3.cleanup(a, st) })
+        col.addView(a.rowItem("Qualité et doublons", "Films sous 720p, titres en double") { LibraryUi2.quality(a, st) })
+        col.addView(a.rowItem("Sous-titres français", "Éléments qui n'en ont pas") { LibraryUi.subtitles(a, st) })
         col.addView(a.section("Maintenance"))
-        col.addView(a.btn2("Mettre à jour les conteneurs") { LibraryUi4.docker(a, st) })
-        col.addView(a.section("Raccourcis"))
+        col.addView(a.rowItem("Mettre à jour les conteneurs", "Sauvegarde puis mise à jour de Docker") { LibraryUi4.docker(a, st) })
+        col.addView(a.section("Ouvrir dans le navigateur"))
         col.addView(link("Jellyfin", 8096, Pal.PURPLE))
         col.addView(link("Prowlarr", 9696, Pal.GRAY))
         col.addView(link("Radarr", 7878, Pal.AMBER))
@@ -57,7 +57,7 @@ class MediaTab(private val a: Activity, private val st: Settings) {
     }
 
     private fun link(label: String, port: Int, color: Int): View =
-        a.btn2(label + "  ·  port " + port, Pal.FG, 52) { open(label, port, "") }
+        a.rowItem(label, "port " + port) { open(label, port, "") }
 
     private fun open(label: String, port: Int, path: String) {
         info.text = "Recherche du PC…"

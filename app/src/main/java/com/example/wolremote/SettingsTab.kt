@@ -19,12 +19,29 @@ class SettingsTab(private val a: Activity, private val st: Settings) {
     private var pendingBytes: ByteArray? = null
 
     init {
-        val col = LinearLayout(a)
-        col.orientation = LinearLayout.VERTICAL
-        col.setPadding(a.dp(16), a.dp(16), a.dp(16), a.dp(24))
-        view.addView(col)
+        val root = LinearLayout(a)
+        root.orientation = LinearLayout.VERTICAL
+        root.setPadding(a.dp(16), a.dp(16), a.dp(16), a.dp(24))
+        view.addView(root)
+        var col = root
+        // Chaque rubrique est un groupe repliable : l'écran reste court
+        fun grp(title: String) {
+            val body = LinearLayout(a)
+            body.orientation = LinearLayout.VERTICAL
+            body.visibility = android.view.View.GONE
+            val head = a.rowItem(title, "", "+") {}
+            val mark = head.getChildAt(1) as android.widget.TextView
+            head.setOnClickListener {
+                val open = body.visibility == android.view.View.GONE
+                body.visibility = if (open) android.view.View.VISIBLE else android.view.View.GONE
+                mark.text = if (open) "−" else "+"
+            }
+            root.addView(head)
+            root.addView(body)
+            col = body
+        }
         col.addView(a.title("Réglages"))
-        col.addView(a.tv("Tout est stocké uniquement sur ce téléphone.", 13f, Pal.MUTED))
+        col.addView(a.tv("Tout est stocké uniquement sur ce téléphone. Les modifications sont enregistrées en quittant l'onglet.", 13f, Pal.MUTED))
 
         fun add(label: String, key: String, type: Int) {
             val l = a.tv(label, 13f, Pal.MUTED)
@@ -38,34 +55,35 @@ class SettingsTab(private val a: Activity, private val st: Settings) {
         val pw = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
         val num = InputType.TYPE_CLASS_NUMBER
 
-        col.addView(a.section("Wake-on-LAN"))
+        grp("Wake-on-LAN")
         add("Serveur Wake-on-LAN (tablette)", "url", uri)
         add("Code PIN", "pin", InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD)
-        col.addView(a.section("Accès au PC"))
+        grp("Accès au PC")
         add("PC : adresse sur le réseau local", "host", uri)
         add("PC : adresse Tailscale (IP ou nom)", "host2", uri)
-        col.addView(a.section("Clés API"))
+        grp("Clés API")
         add("Clé API Prowlarr", "kProwlarr", pw)
         add("Clé API Radarr", "kRadarr", pw)
         add("Clé API Sonarr", "kSonarr", pw)
-        col.addView(a.section("Qualité"))
+        grp("Qualité")
         add("Profil de qualité Radarr (ID, vide = le premier)", "pRadarr", num)
         add("Profil de qualité Sonarr (ID, vide = le premier)", "pSonarr", num)
-        col.addView(a.section("qBittorrent"))
+        grp("qBittorrent")
         add("qBittorrent : port (8080 par défaut)", "pQb", num)
         add("qBittorrent : utilisateur", "kQbUser", InputType.TYPE_CLASS_TEXT)
         add("qBittorrent : mot de passe", "kQbPass", pw)
-        col.addView(a.section("Jellyfin"))
+        grp("Jellyfin")
         add("Clé API Jellyfin (Tableau de bord, Clés API)", "kJellyfin", pw)
-        col.addView(a.section("Consommation"))
+        grp("Consommation")
         add("Prix du kWh en € (par défaut : tarif réglementé EDF Base)", "kTarifKwh", InputType.TYPE_CLASS_TEXT)
 
+        col = root
         col.addView(a.btn("Enregistrer", Pal.GREEN) {
             saveAll()
             Toast.makeText(a, "Réglages enregistrés", Toast.LENGTH_SHORT).show()
         })
 
-        col.addView(a.section("Notifications"))
+        grp("Notifications")
         col.addView(a.tv("Prévient quand un téléchargement est terminé, même appli fermée, et actualise Jellyfin. Une notification discrète reste affichée tant que c'est actif.", 13f, Pal.MUTED))
         val watch = a.btn("", Pal.BLUE) {}
         fun label() { watch.text = if (st.get("kWatch") == "1") "Activées (touche pour désactiver)" else "Désactivées (touche pour activer)" }
@@ -86,7 +104,7 @@ class SettingsTab(private val a: Activity, private val st: Settings) {
         }
         col.addView(watch)
 
-        col.addView(a.section("Maison"))
+        grp("Maison")
         col.addView(a.tv("Allume le PC quand ton téléphone rejoint le Wi-Fi de la maison, et te propose de l'éteindre quand tu en pars. Demande la surveillance en arrière-plan (Notifications).", 13f, Pal.MUTED))
         col.addView(a.btn2("Définir le Wi-Fi actuel comme maison") {
             val g = wifiGateway(a)
@@ -106,7 +124,7 @@ class SettingsTab(private val a: Activity, private val st: Settings) {
         }
         col.addView(geo)
 
-        col.addView(a.section("Mode vacances"))
+        grp("Mode vacances")
         col.addView(a.tv("Coupe la surveillance en arrière-plan et les alertes de la tablette (températures, disque, PC allumé la nuit).", 13f, Pal.MUTED))
         val vacB = a.btn2("") {}
         fun vacLabel() { vacB.text = if (st.get("kVac") == "1") "Mode vacances : activé" else "Mode vacances : désactivé" }
@@ -122,7 +140,7 @@ class SettingsTab(private val a: Activity, private val st: Settings) {
         }
         col.addView(vacB)
 
-        col.addView(a.section("Sauvegarde"))
+        grp("Sauvegarde")
         col.addView(a.tv("Exporte tes réglages (clés API, PIN…) dans un fichier protégé par un mot de passe, pour les retrouver après une réinstallation.", 13f, Pal.MUTED))
         col.addView(a.btn("Exporter mes réglages", Pal.GRAY) {
             saveAll()
@@ -142,6 +160,8 @@ class SettingsTab(private val a: Activity, private val st: Settings) {
             a.startActivityForResult(i, 72)
         })
     }
+
+    fun persist() = saveAll()
 
     private fun saveAll() {
         for ((k, f) in fields) st.put(k, f.text.toString().trim())

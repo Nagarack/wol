@@ -107,6 +107,31 @@ fun Activity.btn(label: String, color: Int, h: Int = 52, onClick: () -> Unit): B
     return b
 }
 
+// Ligne de liste : titre, détail optionnel et repère à droite (touche pour agir)
+fun Activity.rowItem(label: String, sub: String = "", marker: String = "›", onClick: () -> Unit): LinearLayout {
+    val r = LinearLayout(this)
+    r.orientation = LinearLayout.HORIZONTAL
+    r.gravity = android.view.Gravity.CENTER_VERTICAL
+    r.setPadding(dp(16), dp(12), dp(16), dp(12))
+    r.minimumHeight = dp(56)
+    r.background = RippleDrawable(ColorStateList.valueOf(Color.argb(40, 255, 255, 255)), rounded(Pal.CARD, 14, Pal.BORDER), null)
+    val t = LinearLayout(this)
+    t.orientation = LinearLayout.VERTICAL
+    t.addView(tv(label, 16f, Pal.FG))
+    if (sub.isNotEmpty()) t.addView(tv(sub, 13f, Pal.MUTED))
+    r.addView(t, LinearLayout.LayoutParams(0, WRAP, 1f))
+    val m = tv(marker, 20f, Pal.MUTED)
+    r.addView(m)
+    r.setOnClickListener {
+        r.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+        onClick()
+    }
+    val lp = LinearLayout.LayoutParams(MATCH, WRAP)
+    lp.topMargin = dp(8)
+    r.layoutParams = lp
+    return r
+}
+
 // Bouton secondaire : contour discret, pas de remplissage (un seul bouton plein par écran)
 fun Activity.btn2(label: String, textColor: Int = Pal.FG, h: Int = 52, onClick: () -> Unit): Button {
     val b = btn(label, Pal.CARD, h, onClick)
