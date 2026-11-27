@@ -48,8 +48,7 @@ class SettingsTab(private val a: Activity, private val st: Settings) {
         add("qBittorrent : utilisateur", "kQbUser", InputType.TYPE_CLASS_TEXT)
         add("qBittorrent : mot de passe", "kQbPass", pw)
         col.addView(a.section("Consommation"))
-        add("Consommation de base du PC en watts (carte mère, disques, ventilos)", "kBaseW", num)
-        add("Prix du kWh en € (ex : 0.25)", "kTarif", InputType.TYPE_CLASS_TEXT)
+        add("Prix du kWh en € (par défaut : tarif réglementé EDF Base)", "kTarifKwh", InputType.TYPE_CLASS_TEXT)
 
         col.addView(a.btn("Enregistrer", Pal.GREEN) {
             for ((k, f) in fields) st.put(k, f.text.toString().trim())
