@@ -151,9 +151,101 @@ object Discover {
     }
 }
 
+// Séries : nouveautés et populaires via TVMaze (gratuit, sans clé), ajout via Sonarr
+object Shows {
+    val KINDS = listOf("Nouvelles séries", "À venir", "Nouvelles saisons", "Populaires")
+    private class Ep(val date: String, val season: Int, val number: Int, val show: JSONObject)
+    private var eps: List<Ep> = emptyList()
+    private var at = 0L
+
+    private fun fetchSchedule(st: Settings): List<Ep> {
+        if (System.currentTimeMillis() - at < 1800000L && eps.isNotEmpty()) return eps
+        val out = ArrayList<Ep>()
+        val today = java.time.LocalDate.now()
+        for (d in -10..7) {
+            val day = today.plusDays(d.toLong()).toString()
+            var r = Net.call("GET", "https://api.tvmaze.com/schedule/web?date=$day", timeout = 15000)
+            if (r.code == 429) { Thread.sleep(1500); r = Net.call("GET", "https://api.tvmaze.com/schedule/web?date=$day", timeout = 15000) }
+            if (!r.ok) continue
+            val a = JSONArray(r.body)
+            for (k in 0 until a.length()) {
+                val o = a.optJSONObject(k) ?: continue
+                val sh = o.optJSONObject("_embedded")?.optJSONObject("show") ?: continue
+                out.add(Ep(o.str("airdate").ifEmpty { day }, o.optInt("season"), o.optInt("number"), sh))
+            }
+            Thread.sleep(120)
+        }
+        if (out.isEmpty()) throw Exception("TVMaze injoignable")
+        eps = out; at = System.currentTimeMillis()
+        return out
+    }
+
+    private fun norm(sh: JSONObject, sub: String): JSONObject {
+        val ext = sh.optJSONObject("externals")
+        val img = sh.optJSONObject("image")
+        return JSONObject().put("title", sh.str("name")).put("year", sh.str("premiered").take(4).toIntOrNull() ?: 0)
+            .put("overview", sh.str("summary").replace(Regex("<[^>]+>"), "").trim())
+            .put("remotePoster", img?.str("medium") ?: "").put("tvdbId", ext?.optInt("thetvdb", 0) ?: 0).put("sub", sub)
+    }
+
+    fun items(st: Settings, kind: String): List<JSONObject> {
+        val all = fetchSchedule(st)
+        val have = HashSet<Int>()
+        val ks = st.get("kSonarr")
+        if (ks.isNotEmpty()) {
+            val r = Net.call("GET", st.base(8989) + "/api/v3/series", ks, timeout = 20000)
+            if (r.ok) { val a = JSONArray(r.body); for (i in 0 until a.length()) have.add(a.optJSONObject(i)?.optInt("tvdbId") ?: 0) }
+        }
+        val today = java.time.LocalDate.now().toString()
+        val okTypes = setOf("Scripted", "Animation", "Documentary")
+        val valid = all.filter { (it.show.optJSONObject("externals")?.optInt("thetvdb", 0) ?: 0) > 0 &&
+            okTypes.contains(it.show.str("type")) && !have.contains(it.show.optJSONObject("externals")?.optInt("thetvdb", 0) ?: 0) }
+        val picked: List<Pair<Ep, String>> = when (kind) {
+            "Nouvelles séries" -> valid.filter { it.season == 1 && it.number == 1 && it.date <= today }.sortedByDescending { it.date }.map { Pair(it, "Sortie le " + it.date) }
+            "À venir" -> valid.filter { it.season == 1 && it.number == 1 && it.date > today }.sortedBy { it.date }.map { Pair(it, "Sortie le " + it.date) }
+            "Nouvelles saisons" -> valid.filter { it.number == 1 && it.season > 1 && it.date <= today }.sortedByDescending { it.date }.map { Pair(it, "Saison " + it.season + " le " + it.date) }
+            else -> valid.sortedByDescending { it.show.optDouble("weight", 0.0) }.map { Pair(it, "") }
+        }
+        val seen = HashSet<Int>()
+        val out = ArrayList<JSONObject>()
+        for ((e, sub) in picked) {
+            if (!seen.add(e.show.optInt("id"))) continue
+            out.add(norm(e.show, sub))
+            if (out.size >= 40) break
+        }
+        return out
+    }
+
+    // Ajoute la série à Sonarr (première saison surveillée) et lance la recherche ; null = OK
+    fun add(st: Settings, tvdb: Int): String? {
+        val base = st.base(8989)
+        val key = st.get("kSonarr")
+        if (key.isEmpty()) return "clé Sonarr manquante"
+        val lk = Net.call("GET", "$base/api/v3/series/lookup?term=tvdb:$tvdb", key, timeout = 30000)
+        if (!lk.ok) return "introuvable (" + lk.code + ")"
+        val first = JSONArray(lk.body).optJSONObject(0) ?: return "introuvable dans Sonarr"
+        val pref = st.get("pSonarr").trim().toIntOrNull()
+        val prof = pref ?: JSONArray(Net.call("GET", "$base/api/v3/qualityprofile", key).body).optJSONObject(0)?.optInt("id") ?: return "aucun profil de qualité"
+        val body = JSONObject(first.toString())
+        body.remove("id")
+        body.put("qualityProfileId", prof).put("rootFolderPath", "/data/media/series").put("seasonFolder", true).put("monitored", true)
+        body.put("addOptions", JSONObject().put("monitor", "firstSeason").put("searchForMissingEpisodes", true))
+        try {
+            val lp = Net.call("GET", "$base/api/v3/languageprofile", key)
+            if (lp.ok) { val la = JSONArray(lp.body); if (la.length() > 0) body.put("languageProfileId", la.getJSONObject(0).getInt("id")) }
+        } catch (e: Exception) { }
+        val r = Net.call("POST", "$base/api/v3/series", key, body.toString(), 30000)
+        return if (r.ok) null else "refusé (" + r.code + ")"
+    }
+}
+
 object LibraryUi5 {
     fun discover(a: Activity, st: Settings) {
         val body = LinearLayout(a); body.orientation = LinearLayout.VERTICAL
+        val modes = android.widget.HorizontalScrollView(a)
+        modes.isHorizontalScrollBarEnabled = false
+        val modeRow = LinearLayout(a); modeRow.orientation = LinearLayout.HORIZONTAL
+        modes.addView(modeRow)
         val hs = android.widget.HorizontalScrollView(a)
         hs.isHorizontalScrollBarEnabled = false
         val chips = LinearLayout(a); chips.orientation = LinearLayout.HORIZONTAL
@@ -161,27 +253,30 @@ object LibraryUi5 {
         val info = a.tv("Chargement…", 14f, Pal.MUTED)
         info.setPadding(0, a.dp(8), 0, 0)
         val list = LinearLayout(a); list.orientation = LinearLayout.VERTICAL
-        body.addView(hs); body.addView(info); body.addView(list)
+        hs.setPadding(0, a.dp(8), 0, 0)
+        body.addView(modes); body.addView(hs); body.addView(info); body.addView(list)
         dialog(a, "Découvrir", body)
+        var mode = "films"
         var cur = Discover.KINDS[0].first
+        fun kinds(): List<String> = if (mode == "films") Discover.KINDS.map { it.first } else Shows.KINDS
 
-        fun chipsRender(load: (String) -> Unit) {
-            chips.removeAllViews()
-            for ((label, _) in Discover.KINDS) {
-                val sel = label == cur
-                val t = a.tv(label, 14f, if (sel) android.graphics.Color.WHITE else Pal.MUTED)
-                t.setPadding(a.dp(14), a.dp(8), a.dp(14), a.dp(8))
-                t.background = a.rounded(if (sel) Pal.BLUE else Pal.CARD, 20, if (sel) Pal.BLUE else Pal.BORDER)
-                t.setOnClickListener { cur = label; chipsRender(load); load(label) }
-                val lp = LinearLayout.LayoutParams(WRAP, WRAP); lp.rightMargin = a.dp(8)
-                chips.addView(t, lp)
-            }
+        fun chip(label: String, sel: Boolean, click: () -> Unit): android.widget.TextView {
+            val t = a.tv(label, 14f, if (sel) android.graphics.Color.WHITE else Pal.MUTED)
+            t.setPadding(a.dp(14), a.dp(8), a.dp(14), a.dp(8))
+            t.background = a.rounded(if (sel) Pal.BLUE else Pal.CARD, 20, if (sel) Pal.BLUE else Pal.BORDER)
+            t.setOnClickListener { click() }
+            return t
+        }
+        fun add(row: LinearLayout, v: android.view.View) {
+            val lp = LinearLayout.LayoutParams(WRAP, WRAP); lp.rightMargin = a.dp(8)
+            row.addView(v, lp)
         }
 
         fun show(l: List<JSONObject>) {
             list.removeAllViews()
-            info.text = if (l.isEmpty()) "Rien pour l'instant : la synchronisation de Radarr peut prendre une minute. Réessaie." else "Touche un film pour l'ajouter et lancer son téléchargement."
+            info.text = if (l.isEmpty()) "Rien pour l'instant. Réessaie dans une minute." else "Touche un titre pour l'ajouter et lancer son téléchargement."
             for (o in l) {
+                val isShow = o.has("tvdbId")
                 val row = LinearLayout(a); row.orientation = LinearLayout.HORIZONTAL
                 row.setPadding(0, a.dp(8), 0, a.dp(8))
                 val img = ImageView(a)
@@ -192,6 +287,7 @@ object LibraryUi5 {
                 val t = LinearLayout(a); t.orientation = LinearLayout.VERTICAL
                 t.setPadding(a.dp(12), 0, 0, 0)
                 t.addView(a.tv(o.str("title") + (if (o.optInt("year") > 0) " (" + o.optInt("year") + ")" else ""), 15f, Pal.FG))
+                if (o.str("sub").isNotEmpty()) t.addView(a.tv(o.str("sub"), 12f, Pal.BLUE))
                 val state = a.tv(o.str("overview").take(100) + "…", 12f, Pal.MUTED)
                 t.addView(state)
                 row.addView(t, LinearLayout.LayoutParams(0, WRAP, 1f))
@@ -199,7 +295,7 @@ object LibraryUi5 {
                     row.setOnClickListener(null)
                     state.text = "Ajout…"
                     thread {
-                        val err = try { Sagas.add(st, o.optInt("tmdbId")) } catch (e: Exception) { e.message ?: "erreur" }
+                        val err = try { if (isShow) Shows.add(st, o.optInt("tvdbId")) else Sagas.add(st, o.optInt("tmdbId")) } catch (e: Exception) { e.message ?: "erreur" }
                         a.runOnUiThread { state.text = if (err == null) "Ajouté, recherche lancée." else "Échec : $err"; state.setTextColor(if (err == null) Pal.GREEN else Pal.RED) }
                     }
                 }
@@ -210,47 +306,66 @@ object LibraryUi5 {
         fun load(label: String) {
             info.text = "Chargement…"
             list.removeAllViews()
+            val m = mode
             thread {
                 try {
-                    val l = Discover.items(st, label)
-                    a.runOnUiThread { show(l) }
+                    val l = if (m == "films") Discover.items(st, label) else Shows.items(st, label)
+                    a.runOnUiThread { if (m == mode) show(l) }
                 } catch (e: Exception) {
                     a.runOnUiThread { info.text = "Erreur : " + e.message }
                 }
             }
         }
 
-        thread {
-            try {
-                if (Discover.hasLists(st)) {
-                    a.runOnUiThread { chipsRender(::load); load(cur) }
-                } else {
-                    a.runOnUiThread {
-                        info.text = "Les suggestions viennent de listes TMDb gérées par Radarr (populaires, au cinéma, à venir, mieux notés). Elles ne sont pas encore activées."
-                        val b = a.btn("Activer les suggestions", Pal.BLUE, 48) {}
-                        b.setOnClickListener {
-                            b.isEnabled = false
-                            info.text = "Création des listes dans Radarr…"
-                            thread {
-                                val err = try { Discover.enable(st) } catch (e: Exception) { e.message ?: "erreur" }
-                                a.runOnUiThread {
-                                    if (err != null) { info.text = err; b.isEnabled = true }
-                                    else {
-                                        list.removeView(b)
-                                        info.text = "Listes créées. Radarr les synchronise (jusqu'à une minute)…"
-                                        chipsRender(::load)
-                                        thread { Thread.sleep(25000); a.runOnUiThread { load(cur) } }
+        fun chipsRender() {
+            chips.removeAllViews()
+            for (k in kinds()) add(chips, chip(k, k == cur) { cur = k; chipsRender(); load(k) })
+        }
+
+        fun start() {
+            chipsRender()
+            list.removeAllViews()
+            if (mode == "series") { load(cur); return }
+            info.text = "Chargement…"
+            thread {
+                try {
+                    if (Discover.hasLists(st)) {
+                        a.runOnUiThread { load(cur) }
+                    } else {
+                        a.runOnUiThread {
+                            info.text = "Les suggestions de films viennent de listes TMDb gérées par Radarr (populaires, au cinéma, à venir, mieux notés). Elles ne sont pas encore activées."
+                            val b = a.btn("Activer les suggestions", Pal.BLUE, 48) {}
+                            b.setOnClickListener {
+                                b.isEnabled = false
+                                info.text = "Création des listes dans Radarr…"
+                                thread {
+                                    val err = try { Discover.enable(st) } catch (e: Exception) { e.message ?: "erreur" }
+                                    a.runOnUiThread {
+                                        if (err != null) { info.text = err; b.isEnabled = true }
+                                        else {
+                                            list.removeView(b)
+                                            info.text = "Listes créées. Radarr les synchronise (jusqu'à une minute)…"
+                                            thread { Thread.sleep(25000); a.runOnUiThread { if (mode == "films") load(cur) } }
+                                        }
                                     }
                                 }
                             }
+                            list.addView(b)
                         }
-                        list.addView(b)
                     }
+                } catch (e: Exception) {
+                    a.runOnUiThread { info.text = "Erreur : " + e.message }
                 }
-            } catch (e: Exception) {
-                a.runOnUiThread { info.text = "Erreur : " + e.message }
             }
         }
+
+        fun modesRender() {
+            modeRow.removeAllViews()
+            add(modeRow, chip("Films", mode == "films") { mode = "films"; cur = kinds().first(); modesRender(); start() })
+            add(modeRow, chip("Séries", mode == "series") { mode = "series"; cur = kinds().first(); modesRender(); start() })
+        }
+        modesRender()
+        start()
     }
 
     private fun dialog(a: Activity, title: String, body: LinearLayout) {
