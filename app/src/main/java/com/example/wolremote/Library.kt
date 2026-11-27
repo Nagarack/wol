@@ -227,3 +227,182 @@ object LibraryUi {
         }
     }
 }
+
+// Films de mauvaise qualité (Radarr) et doublons (Jellyfin)
+object Quality {
+    class Low(val id: Int, val title: String, val q: String)
+
+    fun lowMovies(st: Settings): List<Low> {
+        val kr = st.get("kRadarr")
+        if (kr.isEmpty()) throw Exception("clé Radarr manquante (Réglages)")
+        val r = Net.call("GET", st.base(7878) + "/api/v3/movie", kr, timeout = 20000)
+        if (!r.ok) throw Exception("Radarr : HTTP " + r.code)
+        val a = JSONArray(r.body)
+        val out = ArrayList<Low>()
+        for (i in 0 until a.length()) {
+            val o = a.optJSONObject(i) ?: continue
+            val q = o.optJSONObject("movieFile")?.optJSONObject("quality")?.optJSONObject("quality") ?: continue
+            if (q.optInt("resolution", 0) < 720)
+                out.add(Low(o.optInt("id"), o.str("title") + " (" + o.optInt("year") + ")", q.str("name")))
+        }
+        return out.sortedBy { it.title }
+    }
+
+    fun search(st: Settings, id: Int): Boolean =
+        Net.call("POST", st.base(7878) + "/api/v3/command", st.get("kRadarr"),
+            json = JSONObject().put("name", "MoviesSearch").put("movieIds", JSONArray().put(id)).toString(), timeout = 15000).ok
+
+    fun duplicates(st: Settings): List<String> {
+        val seen = HashMap<String, Int>()
+        var start = 0
+        while (true) {
+            val r = Jellyfin.get(st, "/Items?IncludeItemTypes=Movie&Recursive=true&StartIndex=$start&Limit=200", 30000)
+            if (!r.ok) break
+            val a = JSONObject(r.body).optJSONArray("Items") ?: break
+            for (i in 0 until a.length()) {
+                val o = a.optJSONObject(i) ?: continue
+                val k = o.str("Name") + " (" + o.optInt("ProductionYear") + ")"
+                seen[k] = (seen[k] ?: 0) + 1
+            }
+            if (a.length() < 200) break
+            start += 200
+            if (start > 5000) break
+        }
+        return seen.filter { it.value > 1 }.keys.sorted()
+    }
+}
+
+// Suivi des séries : prochains épisodes à voir (Jellyfin) + recherche des suivants manquants (Sonarr)
+object Follow {
+    class Next(val series: String, val label: String)
+
+    private fun userId(st: Settings): String {
+        val r = Jellyfin.get(st, "/Users")
+        if (!r.ok) throw Exception("Jellyfin : HTTP " + r.code)
+        val a = JSONArray(r.body)
+        var best = ""
+        var bestDate = ""
+        for (i in 0 until a.length()) {
+            val o = a.optJSONObject(i) ?: continue
+            val d = o.str("LastActivityDate")
+            if (best.isEmpty() || d > bestDate) { best = o.str("Id"); bestDate = d }
+        }
+        if (best.isEmpty()) throw Exception("aucun utilisateur Jellyfin")
+        return best
+    }
+
+    fun nextUp(st: Settings): List<Next> {
+        val r = Jellyfin.get(st, "/Shows/NextUp?UserId=" + userId(st) + "&Limit=30", 20000)
+        if (!r.ok) throw Exception("Jellyfin : HTTP " + r.code)
+        val a = JSONObject(r.body).optJSONArray("Items") ?: return emptyList()
+        val out = ArrayList<Next>()
+        for (i in 0 until a.length()) {
+            val o = a.optJSONObject(i) ?: continue
+            out.add(Next(o.str("SeriesName"), "S" + o.optInt("ParentIndexNumber") + "E" + o.optInt("IndexNumber") + " · " + o.str("Name")))
+        }
+        return out
+    }
+
+    // Lance la recherche des épisodes diffusés mais absents ; renvoie un message
+    fun searchMissing(st: Settings, name: String): String {
+        val ks = st.get("kSonarr")
+        if (ks.isEmpty()) return "clé Sonarr manquante"
+        val sr = Net.call("GET", st.base(8989) + "/api/v3/series", ks, timeout = 20000)
+        if (!sr.ok) return "Sonarr : HTTP " + sr.code
+        val sa = JSONArray(sr.body)
+        var sid = -1
+        for (i in 0 until sa.length()) {
+            val o = sa.optJSONObject(i) ?: continue
+            if (o.str("title").equals(name, true)) { sid = o.optInt("id"); break }
+        }
+        if (sid < 0) return "introuvable dans Sonarr"
+        val er = Net.call("GET", st.base(8989) + "/api/v3/episode?seriesId=$sid", ks, timeout = 20000)
+        if (!er.ok) return "Sonarr : HTTP " + er.code
+        val ea = JSONArray(er.body)
+        val now = java.time.Instant.now().toString()
+        val ids = JSONArray()
+        for (i in 0 until ea.length()) {
+            val o = ea.optJSONObject(i) ?: continue
+            val d = o.str("airDateUtc")
+            if (o.optBoolean("monitored") && !o.optBoolean("hasFile") && d.isNotEmpty() && d < now && ids.length() < 20) ids.put(o.optInt("id"))
+        }
+        if (ids.length() == 0) return "rien de manquant"
+        val c = Net.call("POST", st.base(8989) + "/api/v3/command", ks,
+            json = JSONObject().put("name", "EpisodeSearch").put("episodeIds", ids).toString(), timeout = 15000)
+        return if (c.ok) "recherche de " + ids.length() + " épisode(s) lancée" else "Sonarr : HTTP " + c.code
+    }
+}
+
+object LibraryUi2 {
+    private fun box(a: Activity, title: String, body: LinearLayout) {
+        val sv = ScrollView(a)
+        body.setPadding(a.dp(16), a.dp(8), a.dp(16), a.dp(8))
+        sv.addView(body)
+        a.dialogBuilder().setTitle(title).setView(sv).setPositiveButton("Fermer", null).show()
+    }
+
+    fun follow(a: Activity, st: Settings) {
+        val body = LinearLayout(a); body.orientation = LinearLayout.VERTICAL
+        val info = a.tv("Chargement…", 14f, Pal.MUTED)
+        body.addView(info)
+        box(a, "Suivi des séries", body)
+        thread {
+            try {
+                val n = Follow.nextUp(st)
+                a.runOnUiThread {
+                    info.text = if (n.isEmpty()) "Rien en attente : tu es à jour." else "Prochain épisode à voir. Touche une série pour chercher les épisodes manquants."
+                    for (x in n) {
+                        val row = a.card()
+                        row.addView(a.tv(x.series, 15f, Pal.FG))
+                        val sub = a.tv(x.label, 13f, Pal.MUTED)
+                        row.addView(sub)
+                        row.setOnClickListener {
+                            sub.text = "Recherche…"
+                            thread {
+                                val m = try { Follow.searchMissing(st, x.series) } catch (e: Exception) { e.message ?: "erreur" }
+                                a.runOnUiThread { sub.text = x.label + "\n" + m }
+                            }
+                        }
+                        body.addView(row)
+                    }
+                }
+            } catch (e: Exception) {
+                a.runOnUiThread { info.text = "Erreur : " + e.message }
+            }
+        }
+    }
+
+    fun quality(a: Activity, st: Settings) {
+        val body = LinearLayout(a); body.orientation = LinearLayout.VERTICAL
+        val info = a.tv("Analyse…", 14f, Pal.MUTED)
+        body.addView(info)
+        box(a, "Qualité et doublons", body)
+        thread {
+            try {
+                val low = Quality.lowMovies(st)
+                val dup = try { Quality.duplicates(st) } catch (e: Exception) { emptyList() }
+                a.runOnUiThread {
+                    info.text = low.size.toString() + " film(s) sous 720p. Touche un film pour chercher une meilleure version (selon ton profil de qualité Radarr)."
+                    for (m in low) {
+                        val row = a.tv(m.title + "  ·  " + m.q, 14f, Pal.FG)
+                        row.setPadding(0, a.dp(10), 0, a.dp(10))
+                        row.setOnClickListener {
+                            thread {
+                                val ok = try { Quality.search(st, m.id) } catch (e: Exception) { false }
+                                a.runOnUiThread {
+                                    row.text = m.title + (if (ok) "  ·  recherche lancée" else "  ·  échec")
+                                    row.setTextColor(Pal.MUTED)
+                                }
+                            }
+                        }
+                        body.addView(row)
+                    }
+                    body.addView(a.section("Doublons dans Jellyfin"))
+                    body.addView(a.tv(if (dup.isEmpty()) "Aucun doublon." else dup.joinToString("\n"), 14f, if (dup.isEmpty()) Pal.MUTED else Pal.FG))
+                }
+            } catch (e: Exception) {
+                a.runOnUiThread { info.text = "Erreur : " + e.message }
+            }
+        }
+    }
+}
