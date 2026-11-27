@@ -18,12 +18,13 @@ class Resp(val code: Int, val body: String) {
 }
 
 object Net {
-    fun call(method: String, url: String, key: String = "", json: String? = null, timeout: Int = 20000): Resp {
+    fun call(method: String, url: String, key: String = "", json: String? = null, timeout: Int = 20000, headers: Map<String, String> = emptyMap()): Resp {
         val c = URL(url).openConnection() as HttpURLConnection
         c.requestMethod = method
         c.connectTimeout = if (timeout < 5000) timeout else 5000
         c.readTimeout = timeout
         if (key.isNotEmpty()) c.setRequestProperty("X-Api-Key", key)
+        for ((hk, hv) in headers) c.setRequestProperty(hk, hv)
         try {
             if (json != null) {
                 c.doOutput = true
