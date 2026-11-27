@@ -2,13 +2,20 @@ package com.example.wolremote
 
 import android.app.Activity
 import android.app.AlertDialog
+import android.content.Context
+import android.content.res.ColorStateList
 import android.graphics.Color
+import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.RippleDrawable
 import android.text.InputType
+import android.view.HapticFeedbackConstants
 import android.view.ViewGroup
+import android.view.inputmethod.InputMethodManager
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
+import android.widget.ProgressBar
 import android.widget.TextView
 import org.json.JSONObject
 import java.util.concurrent.CountDownLatch
@@ -17,22 +24,32 @@ const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
 const val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
 
 object Pal {
-    val BG = Color.parseColor("#1C1917")
-    val CARD = Color.parseColor("#292524")
-    val FG = Color.parseColor("#FAFAF9")
-    val MUTED = Color.parseColor("#A8A29E")
-    val GREEN = Color.parseColor("#16A34A")
-    val RED = Color.parseColor("#DC2626")
-    val PURPLE = Color.parseColor("#7C3AED")
-    val BLUE = Color.parseColor("#2563EB")
-    val AMBER = Color.parseColor("#D97706")
-    val GRAY = Color.parseColor("#52525B")
+    val BG = Color.parseColor("#0F0F12")
+    val CARD = Color.parseColor("#1A1A1F")
+    val CARD2 = Color.parseColor("#24242B")
+    val BORDER = Color.parseColor("#2E2E36")
+    val FG = Color.parseColor("#F4F4F5")
+    val MUTED = Color.parseColor("#9A9AA6")
+    val GREEN = Color.parseColor("#22C55E")
+    val RED = Color.parseColor("#EF4444")
+    val PURPLE = Color.parseColor("#8B5CF6")
+    val BLUE = Color.parseColor("#3B82F6")
+    val AMBER = Color.parseColor("#F59E0B")
+    val GRAY = Color.parseColor("#3F3F46")
 }
 
 // Lecture sûre d'une chaîne JSON (optString renvoie "null" pour un null JSON)
 fun JSONObject.str(k: String): String = if (isNull(k)) "" else optString(k, "")
 
 fun Activity.dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
+
+fun Activity.rounded(color: Int, radiusDp: Int = 14, stroke: Int = 0): GradientDrawable {
+    val g = GradientDrawable()
+    g.setColor(color)
+    g.cornerRadius = dp(radiusDp).toFloat()
+    if (stroke != 0) g.setStroke(dp(1), stroke)
+    return g
+}
 
 fun Activity.tv(t: String, size: Float = 15f, color: Int = Pal.FG): TextView {
     val v = TextView(this)
@@ -42,14 +59,45 @@ fun Activity.tv(t: String, size: Float = 15f, color: Int = Pal.FG): TextView {
     return v
 }
 
+fun Activity.title(t: String): TextView {
+    val v = tv(t, 28f, Pal.FG)
+    v.typeface = Typeface.DEFAULT_BOLD
+    v.setPadding(0, 0, 0, dp(6))
+    return v
+}
+
+fun Activity.section(t: String): TextView {
+    val v = tv(t.uppercase(), 12f, Pal.MUTED)
+    v.typeface = Typeface.DEFAULT_BOLD
+    v.letterSpacing = 0.08f
+    v.setPadding(dp(2), dp(22), 0, dp(2))
+    return v
+}
+
+fun Activity.badge(t: String, color: Int): TextView {
+    val v = tv(t, 12f, color)
+    v.typeface = Typeface.DEFAULT_BOLD
+    v.setPadding(dp(9), dp(3), dp(9), dp(3))
+    val bg = GradientDrawable()
+    bg.setColor((color and 0x00FFFFFF) or 0x30000000)
+    bg.cornerRadius = dp(10).toFloat()
+    v.background = bg
+    return v
+}
+
 fun Activity.btn(label: String, color: Int, h: Int = 52, onClick: () -> Unit): Button {
     val b = Button(this)
     b.text = label
     b.textSize = 16f
     b.setTextColor(Color.WHITE)
     b.setAllCaps(false)
-    b.setBackgroundColor(color)
-    b.setOnClickListener { onClick() }
+    b.typeface = Typeface.DEFAULT_BOLD
+    b.stateListAnimator = null
+    b.background = RippleDrawable(ColorStateList.valueOf(Color.argb(70, 255, 255, 255)), rounded(color, 14), null)
+    b.setOnClickListener {
+        b.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+        onClick()
+    }
     val lp = LinearLayout.LayoutParams(MATCH, dp(h))
     lp.topMargin = dp(10)
     b.layoutParams = lp
@@ -61,24 +109,46 @@ fun Activity.field(hint: String, value: String, type: Int = InputType.TYPE_CLASS
     e.hint = hint
     e.setText(value)
     e.setSingleLine()
+    e.textSize = 15f
     e.setTextColor(Pal.FG)
     e.setHintTextColor(Pal.MUTED)
+    e.background = rounded(Pal.CARD2, 12, Pal.BORDER)
+    e.setPadding(dp(14), dp(12), dp(14), dp(12))
     e.inputType = type
+    val lp = LinearLayout.LayoutParams(MATCH, WRAP)
+    lp.topMargin = dp(8)
+    e.layoutParams = lp
     return e
 }
 
 fun Activity.card(): LinearLayout {
     val c = LinearLayout(this)
     c.orientation = LinearLayout.VERTICAL
-    c.setPadding(dp(14), dp(12), dp(14), dp(12))
-    val bg = GradientDrawable()
-    bg.setColor(Pal.CARD)
-    bg.cornerRadius = dp(14).toFloat()
-    c.background = bg
+    c.setPadding(dp(16), dp(14), dp(16), dp(14))
+    c.background = rounded(Pal.CARD, 16, Pal.BORDER)
     val lp = LinearLayout.LayoutParams(MATCH, WRAP)
     lp.topMargin = dp(10)
     c.layoutParams = lp
     return c
+}
+
+fun Activity.progress(pct: Int): ProgressBar {
+    val pb = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal)
+    pb.max = 100
+    pb.progress = pct
+    pb.progressTintList = ColorStateList.valueOf(Pal.GREEN)
+    pb.progressBackgroundTintList = ColorStateList.valueOf(Pal.BORDER)
+    val lp = LinearLayout.LayoutParams(MATCH, dp(8))
+    lp.topMargin = dp(8)
+    lp.bottomMargin = dp(4)
+    pb.layoutParams = lp
+    return pb
+}
+
+fun Activity.hideKeyboard() {
+    val v = currentFocus ?: return
+    val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+    imm.hideSoftInputFromWindow(v.windowToken, 0)
 }
 
 fun Activity.dialogBuilder(): AlertDialog.Builder =

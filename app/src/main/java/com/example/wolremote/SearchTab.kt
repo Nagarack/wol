@@ -19,48 +19,69 @@ import java.util.Locale
 import kotlin.concurrent.thread
 
 class SearchTab(private val a: Activity, private val st: Settings) {
-    val view = ScrollView(a)
-    private val col = LinearLayout(a)
-    private val dots = listOf(a.tv("● Prowlarr", 14f, Pal.MUTED), a.tv("● Radarr", 14f, Pal.MUTED), a.tv("● Sonarr", 14f, Pal.MUTED))
-    private val status = a.tv("", 14f, Pal.MUTED)
-    private val query: EditText = a.field("Rechercher un film, une série…", "")
+    val view = LinearLayout(a)
+    private val dots = listOf(a.tv("● Prowlarr", 11f, Pal.MUTED), a.tv("● Radarr", 11f, Pal.MUTED), a.tv("● Sonarr", 11f, Pal.MUTED))
+    private val status = a.tv("", 13f, Pal.MUTED)
+    private val query: EditText = a.field("Film, série, animé…", "")
     private val chips = LinearLayout(a)
     private val results = LinearLayout(a)
     private var all: List<Rel> = emptyList()
     private var filter = ""
 
     init {
-        view.isFillViewport = true
-        col.orientation = LinearLayout.VERTICAL
-        col.setPadding(a.dp(16), a.dp(16), a.dp(16), a.dp(16))
-        view.addView(col)
+        view.orientation = LinearLayout.VERTICAL
 
-        col.addView(a.tv("Recherche", 26f))
-        col.addView(a.btn("⏻  Réveiller et chercher", Pal.GREEN) { wakeAndSearch() })
+        val header = LinearLayout(a)
+        header.orientation = LinearLayout.VERTICAL
+        header.setPadding(a.dp(16), a.dp(16), a.dp(16), a.dp(4))
 
-        val row = LinearLayout(a)
-        row.orientation = LinearLayout.HORIZONTAL
-        row.setPadding(0, a.dp(10), 0, 0)
-        for (d in dots) row.addView(d, LinearLayout.LayoutParams(0, WRAP, 1f))
-        col.addView(row)
+        val top = LinearLayout(a)
+        top.orientation = LinearLayout.HORIZONTAL
+        top.gravity = Gravity.CENTER_VERTICAL
+        top.addView(a.title("Recherche"), LinearLayout.LayoutParams(0, WRAP, 1f))
+        for (d in dots) {
+            d.setPadding(a.dp(8), 0, 0, 0)
+            top.addView(d)
+        }
+        header.addView(top)
 
+        val sr = LinearLayout(a)
+        sr.orientation = LinearLayout.HORIZONTAL
+        sr.gravity = Gravity.CENTER_VERTICAL
         query.imeOptions = EditorInfo.IME_ACTION_SEARCH
         query.setOnEditorActionListener { _, id, _ ->
             if (id == EditorInfo.IME_ACTION_SEARCH) { search(); true } else false
         }
-        col.addView(query)
-        col.addView(a.btn("Chercher", Pal.BLUE, 48) { search() })
+        val qlp = LinearLayout.LayoutParams(0, WRAP, 1f)
+        qlp.topMargin = 0
+        sr.addView(query, qlp)
+        val sb = a.btn("🔍", Pal.BLUE, 48) { search() }
+        val slp = LinearLayout.LayoutParams(a.dp(56), a.dp(48))
+        slp.leftMargin = a.dp(8)
+        sb.layoutParams = slp
+        sr.addView(sb)
+        header.addView(sr)
 
-        status.setPadding(0, a.dp(10), 0, a.dp(6))
-        col.addView(status)
+        header.addView(a.btn("⏻  Réveiller le PC et chercher", Pal.GREEN, 46) { wakeAndSearch() })
 
         val hs = HorizontalScrollView(a)
+        hs.isHorizontalScrollBarEnabled = false
         chips.orientation = LinearLayout.HORIZONTAL
+        chips.setPadding(0, a.dp(10), 0, 0)
         hs.addView(chips)
-        col.addView(hs)
+        header.addView(hs)
 
+        status.setPadding(a.dp(2), a.dp(8), 0, a.dp(4))
+        header.addView(status)
+        view.addView(header)
+
+        val sc = ScrollView(a)
+        sc.isVerticalScrollBarEnabled = false
         results.orientation = LinearLayout.VERTICAL
-        col.addView(results)
+        results.setPadding(a.dp(16), 0, a.dp(16), a.dp(16))
+        results.addView(a.tv("Saisis un titre puis touche 🔍. Si le PC est éteint, utilise « Réveiller le PC et chercher ».", 14f, Pal.MUTED))
+        sc.addView(results)
+        view.addView(sc, LinearLayout.LayoutParams(MATCH, 0, 1f))
     }
 
     private fun ui(f: () -> Unit) { a.runOnUiThread { f() } }
@@ -123,6 +144,7 @@ class SearchTab(private val a: Activity, private val st: Settings) {
 
     // ---------- Recherche Prowlarr ----------
     private fun search() {
+        a.hideKeyboard()
         val q = query.text.toString().trim()
         if (q.isEmpty()) { setStatus("Saisis une recherche."); return }
         val key = st.get("kProwlarr")
@@ -168,15 +190,13 @@ class SearchTab(private val a: Activity, private val st: Settings) {
         val shown = vis.filter { filter.isEmpty() || it.indexer == filter }
             .sortedByDescending { it.seeders }.take(100)
         for (r in shown) results.addView(card(r))
+        if (shown.isEmpty()) results.addView(a.tv("Aucun résultat.", 14f, Pal.MUTED))
     }
 
     private fun addToggleChip(label: String, on: Boolean) {
         val t = a.tv(if (on) "✓ $label" else label, 14f, Color.WHITE)
         t.setPadding(a.dp(14), a.dp(8), a.dp(14), a.dp(8))
-        val bg = GradientDrawable()
-        bg.setColor(if (on) Pal.GREEN else Pal.GRAY)
-        bg.cornerRadius = a.dp(20).toFloat()
-        t.background = bg
+        t.background = a.rounded(if (on) Pal.GREEN else Pal.GRAY, 20)
         t.setOnClickListener {
             st.put("videoOnly", if (on) "0" else "1")
             filter = ""
@@ -191,10 +211,7 @@ class SearchTab(private val a: Activity, private val st: Settings) {
         val sel = filter == value
         val t = a.tv(label, 14f, if (sel) Color.WHITE else Pal.MUTED)
         t.setPadding(a.dp(14), a.dp(8), a.dp(14), a.dp(8))
-        val bg = GradientDrawable()
-        bg.setColor(if (sel) Pal.BLUE else Pal.CARD)
-        bg.cornerRadius = a.dp(20).toFloat()
-        t.background = bg
+        t.background = a.rounded(if (sel) Pal.BLUE else Pal.CARD, 20, if (sel) Pal.BLUE else Pal.BORDER)
         t.setOnClickListener { filter = value; render() }
         val lp = LinearLayout.LayoutParams(WRAP, WRAP)
         lp.rightMargin = a.dp(8)
@@ -203,16 +220,33 @@ class SearchTab(private val a: Activity, private val st: Settings) {
 
     private fun card(r: Rel): View {
         val c = a.card()
-        c.addView(a.tv(r.title, 15f, Pal.FG))
+        val t = a.tv(r.title, 15f, Pal.FG)
+        t.maxLines = 3
+        t.ellipsize = android.text.TextUtils.TruncateAt.END
+        c.addView(t)
         val go = r.size / 1000000000.0
-        val meta = String.format(Locale.FRANCE, "%.2f Go · %d seeders · %s · %s", go, r.seeders, r.indexer, r.date.take(10))
-        c.addView(a.tv(meta, 13f, Pal.MUTED))
+        val bl = LinearLayout(a)
+        bl.orientation = LinearLayout.HORIZONTAL
+        bl.setPadding(0, a.dp(8), 0, 0)
+        fun tag(txt: String, colr: Int) {
+            val lp = LinearLayout.LayoutParams(WRAP, WRAP)
+            lp.rightMargin = a.dp(6)
+            bl.addView(a.badge(txt, colr), lp)
+        }
+        tag(String.format(Locale.FRANCE, "%.2f Go", go), Pal.MUTED)
+        val sc = if (r.seeders >= 20) Pal.GREEN else if (r.seeders >= 5) Pal.AMBER else Pal.RED
+        tag("▲ " + r.seeders, sc)
+        tag(r.indexer, Pal.BLUE)
+        if (r.date.length >= 10) tag(r.date.take(10), Pal.MUTED)
+        c.addView(bl)
         val row = LinearLayout(a)
         row.orientation = LinearLayout.HORIZONTAL
         fun b(label: String, color: Int, f: () -> Unit) {
             val x = a.btn(label, color, 44, f)
             val lp = LinearLayout.LayoutParams(0, a.dp(44), 1f)
-            lp.topMargin = a.dp(10); lp.leftMargin = a.dp(3); lp.rightMargin = a.dp(3)
+            lp.topMargin = a.dp(10)
+            lp.leftMargin = a.dp(3)
+            lp.rightMargin = a.dp(3)
             x.layoutParams = lp
             row.addView(x)
         }

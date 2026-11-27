@@ -17,7 +17,7 @@ class LinksTab(private val a: Activity, private val st: Settings) {
         col.orientation = LinearLayout.VERTICAL
         col.setPadding(a.dp(16), a.dp(16), a.dp(16), a.dp(16))
         view.addView(col)
-        col.addView(a.tv("Raccourcis", 26f))
+        col.addView(a.title("Raccourcis"))
         col.addView(a.tv("Ouvre l'interface web dans le navigateur du téléphone (réseau local ou Tailscale, selon ce qui répond).", 13f, Pal.MUTED))
         col.addView(link("Prowlarr", 9696, Pal.PURPLE))
         col.addView(link("Radarr", 7878, Pal.AMBER))
@@ -28,7 +28,7 @@ class LinksTab(private val a: Activity, private val st: Settings) {
     }
 
     private fun link(label: String, port: Int, color: Int): View =
-        a.btn(label + "  (port " + port + ")", color, 64) { open(label, port) }
+        a.btn(label + "\nport " + port, color, 76) { open(label, port) }
 
     private fun open(label: String, port: Int) {
         info.text = "Recherche du PC…"

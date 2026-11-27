@@ -24,7 +24,7 @@ class QueueTab(private val a: Activity, private val st: Settings) {
         col.orientation = LinearLayout.VERTICAL
         col.setPadding(a.dp(16), a.dp(16), a.dp(16), a.dp(16))
         view.addView(col)
-        col.addView(a.tv("En cours", 26f))
+        col.addView(a.title("En cours"))
         info.setPadding(0, a.dp(6), 0, 0)
         col.addView(info)
         list.orientation = LinearLayout.VERTICAL
@@ -83,10 +83,7 @@ class QueueTab(private val a: Activity, private val st: Settings) {
                 for (item in items) {
                     val c = a.card()
                     c.addView(a.tv(item.title, 14f, Pal.FG))
-                    val pb = ProgressBar(a, null, android.R.attr.progressBarStyleHorizontal)
-                    pb.max = 100
-                    pb.progress = item.pct
-                    c.addView(pb, LinearLayout.LayoutParams(MATCH, WRAP))
+                    c.addView(a.progress(item.pct))
                     c.addView(a.tv(item.who + " · " + item.pct + " % · " + item.extra, 12f, Pal.MUTED))
                     list.addView(c)
                 }

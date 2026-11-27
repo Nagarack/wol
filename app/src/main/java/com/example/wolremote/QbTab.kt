@@ -21,9 +21,9 @@ class QbTab(private val a: Activity, private val st: Settings) {
     private val col = LinearLayout(a)
     private val info = a.tv("", 14f, Pal.MUTED)
     private val summary = a.card()
-    private val headActive = a.tv("", 18f)
+    private val headActive = a.section("")
     private val listActive = LinearLayout(a)
-    private val headDone = a.tv("", 18f)
+    private val headDone = a.section("")
     private val listDone = LinearLayout(a)
     private var busy = false
     private var sid = ""
@@ -33,15 +33,13 @@ class QbTab(private val a: Activity, private val st: Settings) {
         col.orientation = LinearLayout.VERTICAL
         col.setPadding(a.dp(16), a.dp(16), a.dp(16), a.dp(16))
         view.addView(col)
-        col.addView(a.tv("qBittorrent", 26f))
+        col.addView(a.title("qBittorrent"))
         info.setPadding(0, a.dp(6), 0, 0)
         col.addView(info)
         col.addView(summary)
-        headActive.setPadding(0, a.dp(18), 0, 0)
         col.addView(headActive)
         listActive.orientation = LinearLayout.VERTICAL
         col.addView(listActive)
-        headDone.setPadding(0, a.dp(18), 0, 0)
         col.addView(headDone)
         listDone.orientation = LinearLayout.VERTICAL
         col.addView(listDone)
@@ -182,16 +180,13 @@ class QbTab(private val a: Activity, private val st: Settings) {
         summary.addView(a.tv("⬇ " + act.size + " en cours    ✓ " + done.size + " terminés", 17f, Pal.FG))
         summary.addView(a.tv("↓ " + fmtSpeed(dl) + "    ↑ " + fmtSpeed(up), 14f, Pal.MUTED))
 
-        headActive.text = "En cours (" + act.size + ")"
+        headActive.text = "EN COURS (" + act.size + ")"
         if (act.isEmpty()) listActive.addView(a.tv("Aucun téléchargement en cours.", 14f, Pal.MUTED))
         for (o in act) {
             val c = a.card()
             c.addView(a.tv(o.str("name"), 14f, Pal.FG))
             val pct = (o.optDouble("progress", 0.0) * 100).toInt()
-            val pb = ProgressBar(a, null, android.R.attr.progressBarStyleHorizontal)
-            pb.max = 100
-            pb.progress = pct
-            c.addView(pb, LinearLayout.LayoutParams(MATCH, WRAP))
+            c.addView(a.progress(pct))
             val line = pct.toString() + " % · " + fmtSize(o.optLong("size", 0L)) + " · " +
                 fmtSpeed(o.optLong("dlspeed", 0L)) + " · reste " + fmtEta(o.optLong("eta", 8640000L)) +
                 " · " + stateFr(o.str("state"))
@@ -199,7 +194,7 @@ class QbTab(private val a: Activity, private val st: Settings) {
             listActive.addView(c)
         }
 
-        headDone.text = "Terminés (" + done.size + ")"
+        headDone.text = "TERMINÉS (" + done.size + ")"
         if (done.isEmpty()) listDone.addView(a.tv("Rien de terminé pour l'instant.", 14f, Pal.MUTED))
         val fmt = SimpleDateFormat("dd/MM HH:mm", Locale.FRANCE)
         for (o in done.take(30)) {
