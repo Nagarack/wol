@@ -26,6 +26,7 @@ class MainActivity : Activity() {
     private lateinit var msg: TextView
     private lateinit var queue: QueueTab
     private lateinit var qb: QbTab
+    private lateinit var media: MediaTab
     private lateinit var views: List<View>
     private lateinit var navs: List<TextView>
     private var current = -1
@@ -36,6 +37,7 @@ class MainActivity : Activity() {
             if (current == 0) { refreshPc(); power.refresh() }
             if (current == 2) queue.refresh()
             if (current == 3) qb.refresh()
+            if (current == 4) media.refresh()
             handler.postDelayed(this, 2000)
         }
     }
@@ -60,9 +62,9 @@ class MainActivity : Activity() {
         }
         queue = QueueTab(this, st, qbc)
         qb = QbTab(this, st, qbc)
-        val links = LinksTab(this, st)
+        media = MediaTab(this, st)
         val settings = SettingsTab(this, st)
-        views = listOf(buildPcTab(), search.view, queue.view, qb.view, links.view, settings.view)
+        views = listOf(buildPcTab(), search.view, queue.view, qb.view, media.view, settings.view)
 
         val frame = FrameLayout(this)
         for (v in views) frame.addView(v, FrameLayout.LayoutParams(MATCH, MATCH))
@@ -71,8 +73,8 @@ class MainActivity : Activity() {
         nav.orientation = LinearLayout.HORIZONTAL
         nav.setBackgroundColor(Pal.CARD)
         nav.setPadding(dp(6), dp(6), dp(6), dp(6))
-        val icons = listOf("💻", "🔎", "⬇", "📦", "🔗", "⚙")
-        val names = listOf("PC", "Chercher", "En cours", "qBit", "Liens", "Réglages")
+        val icons = listOf("💻", "🔎", "⬇", "📦", "🎬", "⚙")
+        val names = listOf("PC", "Chercher", "En cours", "qBit", "Média", "Réglages")
         val list = ArrayList<TextView>()
         for (i in icons.indices) {
             val s = SpannableString(icons[i] + "\n" + names[i])
@@ -130,6 +132,7 @@ class MainActivity : Activity() {
         if (i == 0) { refreshPc(); power.refresh() }
         if (i == 2) queue.refresh()
         if (i == 3) qb.refresh()
+        if (i == 4) media.refresh()
     }
 
     // ---------- Onglet PC (Wake-on-LAN inchangé + Chroniques) ----------
@@ -180,6 +183,12 @@ class MainActivity : Activity() {
                     .setNegativeButton("Annuler", null).show()
             }
         ))
+
+        col.addView(btn("Redémarrer", Pal.AMBER, 56) {
+            dialogBuilder().setMessage("Redémarrer le PC ? Il se reconnectera tout seul.")
+                .setPositiveButton("Redémarrer") { _, _ -> act("/restart") }
+                .setNegativeButton("Annuler", null).show()
+        })
 
         col.addView(section("Chroniques"))
         col.addView(pair(

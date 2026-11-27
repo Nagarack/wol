@@ -13,13 +13,25 @@ jobs:
         with: { distribution: temurin, java-version: 17 }
       - uses: gradle/actions/setup-gradle@v4
         with: { gradle-version: 8.7 }
+      - name: Clé de signature (secrets GitHub)
+        env:
+          KS: ${{ secrets.KEYSTORE_B64 }}
+        run: |
+          if [ -n "$KS" ]; then
+            echo "$KS" | base64 -d > app/mon-pc.keystore
+            echo "SIGNED=1" >> "$GITHUB_ENV"
+          else
+            echo "::warning::Secret KEYSTORE_B64 absent : APK de test signé avec une clé temporaire, aucune release publiée."
+          fi
       - run: gradle assembleDebug --no-daemon
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
       - uses: actions/upload-artifact@v4
         with:
           name: MonPC-apk
           path: app/build/outputs/apk/debug/app-debug.apk
       - name: Publier la release (mise à jour automatique de l'appli)
-        if: github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/main' && env.SIGNED == '1'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

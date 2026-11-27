@@ -49,6 +49,34 @@ class QbClient(private val st: Settings) {
         }
     }
 
+    private fun post(path: String, form: String): Resp {
+        var r = req("POST", path, form)
+        if (r.code == 401 || r.code == 403) {
+            sid = ""
+            torrents()
+            r = req("POST", path, form)
+        }
+        return r
+    }
+
+    // Essaie plusieurs routes (qBittorrent 5 : stop/start ; 4.x : pause/resume)
+    @Synchronized
+    private fun act(paths: List<String>, form: String): Boolean {
+        try {
+            for (p in paths) {
+                val r = post(p, form)
+                if (r.code != 404) return r.ok
+            }
+        } catch (e: Exception) {
+        }
+        return false
+    }
+
+    fun pause(hash: String) = act(listOf("/api/v2/torrents/stop", "/api/v2/torrents/pause"), "hashes=" + Net.enc(hash))
+    fun resume(hash: String) = act(listOf("/api/v2/torrents/start", "/api/v2/torrents/resume"), "hashes=" + Net.enc(hash))
+    fun delete(hash: String, files: Boolean) = act(listOf("/api/v2/torrents/delete"), "hashes=" + Net.enc(hash) + "&deleteFiles=" + files)
+    fun setDownloadLimit(bytes: Long) = act(listOf("/api/v2/transfer/setDownloadLimit"), "limit=$bytes")
+
     @Synchronized
     fun torrents(): Result {
         val empty = JSONArray()

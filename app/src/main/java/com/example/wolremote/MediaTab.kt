@@ -1,0 +1,153 @@
+package com.example.wolremote
+
+import android.app.Activity
+import android.content.Intent
+import android.net.Uri
+import android.view.View
+import android.widget.ImageView
+import android.widget.LinearLayout
+import android.widget.ScrollView
+import org.json.JSONArray
+import kotlin.concurrent.thread
+
+// Média : Jellyfin (lecture en cours, ajouts récents, actualisation) + raccourcis vers les autres services.
+class MediaTab(private val a: Activity, private val st: Settings) {
+    val view = ScrollView(a)
+    private val info = a.tv("", 13f, Pal.MUTED)
+    private val nowCard = a.card()
+    private val recentBox = LinearLayout(a)
+    private var busy = false
+    private var lastRecent = 0L
+
+    init {
+        val col = LinearLayout(a)
+        col.orientation = LinearLayout.VERTICAL
+        col.setPadding(a.dp(16), a.dp(16), a.dp(16), a.dp(16))
+        view.addView(col)
+        col.addView(a.title("Média"))
+        col.addView(a.section("En lecture"))
+        col.addView(nowCard)
+        col.addView(a.btn("Actualiser la bibliothèque", Pal.BLUE, 52) {
+            info.text = "…"
+            thread {
+                val t = Jellyfin.refresh(st)
+                a.runOnUiThread { info.text = t }
+            }
+        })
+        col.addView(a.section("Ajouts récents"))
+        recentBox.orientation = LinearLayout.VERTICAL
+        col.addView(recentBox)
+        info.setPadding(0, a.dp(10), 0, 0)
+        col.addView(info)
+        col.addView(a.section("Raccourcis"))
+        col.addView(link("Jellyfin", 8096, Pal.PURPLE))
+        col.addView(link("Prowlarr", 9696, Pal.GRAY))
+        col.addView(link("Radarr", 7878, Pal.AMBER))
+        col.addView(link("Sonarr", 8989, Pal.BLUE))
+        col.addView(link("qBittorrent", st.qbPort(), Pal.GREEN))
+    }
+
+    private fun link(label: String, port: Int, color: Int): View =
+        a.btn(label + "  ·  port " + port, color, 52) { open(label, port, "") }
+
+    private fun open(label: String, port: Int, path: String) {
+        info.text = "Recherche du PC…"
+        thread {
+            val ok = st.reach(port)
+            a.runOnUiThread {
+                if (!ok) {
+                    info.text = "$label ne répond pas : PC éteint ou service arrêté."
+                } else {
+                    val url = st.base(port) + path
+                    info.text = ""
+                    try {
+                        a.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                    } catch (e: Exception) {
+                        info.text = "Impossible d'ouvrir le navigateur."
+                    }
+                }
+            }
+        }
+    }
+
+    fun refresh() {
+        if (busy) return
+        busy = true
+        thread {
+            var now = ""
+            var err = ""
+            var items: JSONArray? = null
+            try {
+                if (st.get("kJellyfin").trim().isEmpty()) {
+                    err = "Ajoute la clé API Jellyfin dans Réglages."
+                } else if (st.active.isEmpty() && !st.reach(8096)) {
+                    err = "Jellyfin injoignable (PC éteint ?)."
+                } else {
+                    val s = Jellyfin.get(st, "/Sessions?ActiveWithinSeconds=30")
+                    if (s.code == 401) {
+                        err = "Clé API Jellyfin refusée : recrée-en une."
+                    } else if (s.ok) {
+                        val arr = JSONArray(s.body)
+                        val lines = ArrayList<String>()
+                        for (i in 0 until arr.length()) {
+                            val o = arr.optJSONObject(i) ?: continue
+                            val np = o.optJSONObject("NowPlayingItem") ?: continue
+                            val ps = o.optJSONObject("PlayState")
+                            val ticks = np.optLong("RunTimeTicks", 0L)
+                            val pos = ps?.optLong("PositionTicks", 0L) ?: 0L
+                            val pct = if (ticks > 0) (pos * 100 / ticks).toInt() else 0
+                            val sn = np.str("SeriesName")
+                            lines.add((if (ps?.optBoolean("IsPaused", false) == true) "⏸ " else "▶ ") +
+                                o.str("UserName") + " · " + o.str("DeviceName") + "\n" +
+                                (if (sn.isNotEmpty()) sn + " – " else "") + np.str("Name") + "   " + pct + " %")
+                        }
+                        now = lines.joinToString("\n\n")
+                    }
+                    if (System.currentTimeMillis() - lastRecent > 60000L) {
+                        val r = Jellyfin.get(st, "/Items?SortBy=DateCreated&SortOrder=Descending&Recursive=true&IncludeItemTypes=Movie,Series&Limit=30&Fields=ProductionYear")
+                        if (r.ok) {
+                            items = org.json.JSONObject(r.body).optJSONArray("Items")
+                            lastRecent = System.currentTimeMillis()
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                err = "Jellyfin : " + e.message
+            }
+            val nowF = now
+            val errF = err
+            val itemsF = items
+            a.runOnUiThread {
+                busy = false
+                nowCard.removeAllViews()
+                nowCard.addView(a.tv(if (errF.isNotEmpty()) errF else if (nowF.isEmpty()) "Rien en lecture." else nowF, 14f, if (errF.isNotEmpty() || nowF.isEmpty()) Pal.MUTED else Pal.FG))
+                if (itemsF != null) renderRecent(itemsF)
+            }
+        }
+    }
+
+    private fun renderRecent(items: JSONArray) {
+        recentBox.removeAllViews()
+        for (i in 0 until items.length()) {
+            val o = items.optJSONObject(i) ?: continue
+            val id = o.str("Id")
+            val row = a.card()
+            row.orientation = LinearLayout.HORIZONTAL
+            val img = ImageView(a)
+            img.scaleType = ImageView.ScaleType.CENTER_CROP
+            img.setBackgroundColor(Pal.CARD2)
+            row.addView(img, LinearLayout.LayoutParams(a.dp(56), a.dp(84)))
+            val tx = LinearLayout(a)
+            tx.orientation = LinearLayout.VERTICAL
+            tx.setPadding(a.dp(12), 0, 0, 0)
+            tx.addView(a.tv(o.str("Name"), 15f, Pal.FG))
+            val type = if (o.str("Type") == "Series") "Série" else "Film"
+            val yr = o.optInt("ProductionYear", 0)
+            tx.addView(a.tv(type + (if (yr > 0) " · $yr" else ""), 12f, Pal.MUTED))
+            row.addView(tx, LinearLayout.LayoutParams(0, WRAP, 1f))
+            row.setOnClickListener { open("Jellyfin", 8096, "/web/index.html#!/details?id=$id") }
+            recentBox.addView(row)
+            Img.load(st.base(8096) + "/Items/" + id + "/Images/Primary?maxHeight=300&quality=80", img)
+        }
+    }
+}

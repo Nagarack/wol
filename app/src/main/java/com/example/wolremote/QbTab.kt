@@ -3,7 +3,9 @@ package com.example.wolremote
 import android.app.Activity
 import android.content.Intent
 import android.net.Uri
+import android.widget.Button
 import android.widget.LinearLayout
+import android.widget.Toast
 import android.widget.ProgressBar
 import android.widget.ScrollView
 import org.json.JSONArray
@@ -17,7 +19,7 @@ import kotlin.concurrent.thread
 
 // Résumé des téléchargements qBittorrent (API Web v2)
 class QbTab(private val a: Activity, private val st: Settings, private val client: QbClient) {
-    val view = ScrollView(a)
+    val view = TouchScroll(a)
     private val col = LinearLayout(a)
     private val info = a.tv("", 14f, Pal.MUTED)
     private val summary = a.card()
@@ -96,7 +98,45 @@ class QbTab(private val a: Activity, private val st: Settings, private val clien
         else -> s
     }
 
+    private fun small(label: String, color: Int, onClick: () -> Unit): Button {
+        val b = a.btn(label, color, 40, onClick)
+        b.textSize = 13f
+        return b
+    }
+
+    private fun row(vararg bs: Button): LinearLayout {
+        val r = LinearLayout(a)
+        r.orientation = LinearLayout.HORIZONTAL
+        for ((i, b) in bs.withIndex()) {
+            val lp = LinearLayout.LayoutParams(0, WRAP, 1f)
+            lp.topMargin = a.dp(8)
+            if (i > 0) lp.leftMargin = a.dp(8)
+            b.layoutParams = lp
+            r.addView(b)
+        }
+        return r
+    }
+
+    private fun doIt(ok: String, f: () -> Boolean) {
+        thread {
+            val res = f()
+            a.runOnUiThread {
+                Toast.makeText(a, if (res) ok else "Échec de l'action", Toast.LENGTH_SHORT).show()
+                refresh()
+            }
+        }
+    }
+
+    private fun limitDialog() {
+        val names = arrayOf("Illimitée", "10 Mo/s", "5 Mo/s", "2 Mo/s", "500 Ko/s")
+        val vals = longArrayOf(0L, 10000000L, 5000000L, 2000000L, 500000L)
+        a.dialogBuilder().setTitle("Limite de téléchargement")
+            .setItems(names) { _, i -> doIt("Limite : " + names[i]) { client.setDownloadLimit(vals[i]) } }
+            .setNegativeButton("Annuler", null).show()
+    }
+
     private fun render(data: JSONArray, msg: String) {
+        if (android.os.SystemClock.uptimeMillis() - view.lastTouch < 1500) return
         info.text = msg
         summary.removeAllViews()
         listActive.removeAllViews()
@@ -121,6 +161,11 @@ class QbTab(private val a: Activity, private val st: Settings, private val clien
 
         summary.addView(a.tv("⬇ " + act.size + " en cours    ✓ " + done.size + " terminés", 17f, Pal.FG))
         summary.addView(a.tv("↓ " + fmtSpeed(dl) + "    ↑ " + fmtSpeed(up), 14f, Pal.MUTED))
+        summary.addView(row(
+            small("⏸ Tout", Pal.GRAY) { doIt("Tout est en pause") { client.pause("all") } },
+            small("▶ Tout", Pal.GREEN) { doIt("Tout reprend") { client.resume("all") } },
+            small("🐢 Limite", Pal.BLUE) { limitDialog() }
+        ))
 
         headActive.text = "EN COURS (" + act.size + ")"
         if (act.isEmpty()) listActive.addView(a.tv("Aucun téléchargement en cours.", 14f, Pal.MUTED))
@@ -133,6 +178,19 @@ class QbTab(private val a: Activity, private val st: Settings, private val clien
                 fmtSpeed(o.optLong("dlspeed", 0L)) + " · reste " + fmtEta(o.optLong("eta", 8640000L)) +
                 " · " + stateFr(o.str("state"))
             c.addView(a.tv(line, 12f, Pal.MUTED))
+            val hash = o.str("hash")
+            val name = o.str("name")
+            val paused = o.str("state").let { it.startsWith("paused") || it.startsWith("stopped") }
+            c.addView(row(
+                if (paused) small("▶ Reprendre", Pal.GREEN) { doIt("Repris") { client.resume(hash) } }
+                else small("⏸ Pause", Pal.GRAY) { doIt("En pause") { client.pause(hash) } },
+                small("🗑 Supprimer", Pal.RED) {
+                    a.dialogBuilder().setTitle("Supprimer ce téléchargement ?").setMessage(name)
+                        .setPositiveButton("Avec les fichiers") { _, _ -> doIt("Supprimé") { client.delete(hash, true) } }
+                        .setNeutralButton("Garder les fichiers") { _, _ -> doIt("Retiré de qBittorrent") { client.delete(hash, false) } }
+                        .setNegativeButton("Annuler", null).show()
+                }
+            ))
             listActive.addView(c)
         }
 

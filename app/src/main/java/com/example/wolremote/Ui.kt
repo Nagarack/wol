@@ -171,3 +171,12 @@ fun Activity.confirmWait(title: String, msg: String, yes: String): Boolean {
     latch.await()
     return res
 }
+
+// ScrollView qui mémorise le dernier contact : on évite de reconstruire l'écran sous le doigt.
+class TouchScroll(ctx: android.content.Context) : android.widget.ScrollView(ctx) {
+    var lastTouch = 0L
+    override fun dispatchTouchEvent(ev: android.view.MotionEvent): Boolean {
+        lastTouch = android.os.SystemClock.uptimeMillis()
+        return super.dispatchTouchEvent(ev)
+    }
+}

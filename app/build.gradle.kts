@@ -10,8 +10,8 @@ android {
         applicationId = "com.example.wolremote"
         minSdk = 24
         targetSdk = 34
-        versionCode = 10
-        versionName = "2.8"
+        versionCode = 11
+        versionName = "3.0"
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -19,18 +19,22 @@ android {
     }
     kotlinOptions { jvmTarget = "17" }
 
-    // Clé de signature fixe : les mises à jour s'installent par-dessus, sans désinstaller.
+    // Clé de signature fixe (fournie par les « secrets » GitHub, jamais dans le dépôt) :
+    // les mises à jour s'installent par-dessus, sans désinstaller.
+    val ksFile = file("mon-pc.keystore")
     signingConfigs {
-        create("fixed") {
-            storeFile = file("mon-pc.keystore")
-            storePassword = "monpcstore"
-            keyAlias = "monpc"
-            keyPassword = "monpcstore"
+        if (ksFile.exists()) {
+            create("fixed") {
+                storeFile = ksFile
+                storePassword = System.getenv("KEYSTORE_PASSWORD")
+                keyAlias = "monpc"
+                keyPassword = System.getenv("KEYSTORE_PASSWORD")
+            }
         }
     }
     buildTypes {
         getByName("debug") {
-            signingConfig = signingConfigs.getByName("fixed")
+            if (ksFile.exists()) signingConfig = signingConfigs.getByName("fixed")
         }
     }
 }
