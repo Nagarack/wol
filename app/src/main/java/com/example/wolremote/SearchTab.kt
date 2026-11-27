@@ -27,6 +27,15 @@ class SearchTab(private val a: Activity, private val st: Settings) {
     private val results = LinearLayout(a)
     private var all: List<Rel> = emptyList()
     private var filter = ""
+    // Bibliothèque (Radarr / Sonarr) pour repérer ce qu'on a déjà ; sélection multiple
+    private var libMovies: List<Pair<String, Int>> = emptyList()   // titre normalisé, année
+    private var libHas: Set<String> = emptySet()                    // titre normalisé + année des films déjà téléchargés
+    private var libSeries: List<String> = emptyList()
+    private var libAt = 0L
+    private var libBusy = false
+    private val selected = LinkedHashSet<String>()
+    private val bar = LinearLayout(a)
+    private val barText = a.tv("", 15f, Pal.FG)
     private var fQ = st.get("sQ")      // qualité : "", 4K, 1080p, 720p, SD
     private var fL = st.get("sL")      // langue : "", vf (VF + MULTI), vostfr
     private var fS = st.get("sS").toIntOrNull() ?: 0   // taille max en Go (0 = sans limite)
@@ -86,6 +95,137 @@ class SearchTab(private val a: Activity, private val st: Settings) {
         results.addView(a.tv("Saisis un titre puis touche Chercher. Si le PC est éteint, utilise « Réveiller le PC et chercher ».", 14f, Pal.MUTED))
         sc.addView(results)
         view.addView(sc, LinearLayout.LayoutParams(MATCH, 0, 1f))
+
+        bar.orientation = LinearLayout.HORIZONTAL
+        bar.gravity = Gravity.CENTER_VERTICAL
+        bar.setBackgroundColor(Pal.CARD)
+        bar.setPadding(a.dp(16), a.dp(8), a.dp(16), a.dp(8))
+        bar.visibility = View.GONE
+        bar.addView(barText, LinearLayout.LayoutParams(0, WRAP, 1f))
+        val cancel = a.btn2("Annuler", Pal.FG, 44) { selected.clear(); updateBar(); render() }
+        cancel.layoutParams = LinearLayout.LayoutParams(WRAP, a.dp(44))
+        bar.addView(cancel)
+        val send = a.btn("Envoyer", Pal.BLUE, 44) { sendBatch() }
+        val slp2 = LinearLayout.LayoutParams(WRAP, a.dp(44))
+        slp2.leftMargin = a.dp(8)
+        send.layoutParams = slp2
+        bar.addView(send)
+        view.addView(bar, LinearLayout.LayoutParams(MATCH, WRAP))
+    }
+
+    private fun norm(s: String): String =
+        java.text.Normalizer.normalize(s.lowercase(), java.text.Normalizer.Form.NFD).filter { it.isLetterOrDigit() && it.code < 128 }
+
+    private fun ensureLib() {
+        if (libBusy || System.currentTimeMillis() - libAt < 300000L) return
+        libBusy = true
+        thread {
+            val mv = ArrayList<Pair<String, Int>>()
+            val has = HashSet<String>()
+            val sr = ArrayList<String>()
+            try {
+                val kr = st.get("kRadarr")
+                if (kr.isNotEmpty()) {
+                    val r = Net.call("GET", st.base(7878) + "/api/v3/movie", kr, timeout = 20000)
+                    if (r.ok) {
+                        val arr = JSONArray(r.body)
+                        for (i in 0 until arr.length()) {
+                            val o = arr.optJSONObject(i) ?: continue
+                            val n = norm(o.str("title"))
+                            mv.add(Pair(n, o.optInt("year")))
+                            if (o.optBoolean("hasFile")) has.add(n + o.optInt("year"))
+                        }
+                    }
+                }
+                val ks = st.get("kSonarr")
+                if (ks.isNotEmpty()) {
+                    val r = Net.call("GET", st.base(8989) + "/api/v3/series", ks, timeout = 20000)
+                    if (r.ok) {
+                        val arr = JSONArray(r.body)
+                        for (i in 0 until arr.length()) sr.add(norm(arr.optJSONObject(i)?.str("title") ?: ""))
+                    }
+                }
+                libMovies = mv; libHas = has; libSeries = sr
+                libAt = System.currentTimeMillis()
+            } catch (e: Exception) {
+                libAt = System.currentTimeMillis() - 240000L
+            }
+            libBusy = false
+            ui { render() }
+        }
+    }
+
+    // "" = inconnu, "file" = film déjà là, "tracked" = film suivi sans fichier, "series" = série déjà suivie
+    private fun libState(r: Rel): String {
+        val rt = norm(r.title)
+        for ((n, y) in libMovies) {
+            if (n.length >= 3 && rt.startsWith(n + y)) return if (libHas.contains(n + y)) "file" else "tracked"
+        }
+        val tl = r.title.lowercase()
+        if (Regex("s\\d{1,2}e\\d{1,2}|season|saison").containsMatchIn(tl)) {
+            for (n in libSeries) if (n.length >= 4 && rt.startsWith(n)) return "series"
+        }
+        return ""
+    }
+
+    private fun updateBar() {
+        bar.visibility = if (selected.isEmpty()) View.GONE else View.VISIBLE
+        barText.text = selected.size.toString() + " sélectionné(s)"
+    }
+
+    private fun toggle(r: Rel, c: View) {
+        if (!selected.add(r.guid)) selected.remove(r.guid)
+        c.background = a.rounded(Pal.CARD, 16, if (selected.contains(r.guid)) Pal.BLUE else Pal.BORDER)
+        updateBar()
+    }
+
+    // Envoi groupé : films vers Radarr, séries vers Sonarr, le reste vers qBittorrent via Prowlarr
+    private fun sendBatch() {
+        val items = all.filter { selected.contains(it.guid) }
+        if (items.isEmpty()) return
+        a.dialogBuilder().setMessage("Envoyer " + items.size + " résultat(s) ? Les films vont à Radarr, les séries à Sonarr, le reste à qBittorrent.")
+            .setPositiveButton("Envoyer") { _, _ ->
+                setStatus("Envoi de " + items.size + " résultat(s)…")
+                thread {
+                    var ok = 0
+                    val fails = ArrayList<String>()
+                    for (r in items) {
+                        val movie = r.cats.any { it.first in 2000..2999 }
+                        val tv = r.cats.any { it.first in 5000..5999 }
+                        val msg: String? = try {
+                            if (movie && st.get("kRadarr").isNotEmpty()) pushDirect(st.base(7878), st.get("kRadarr"), r, "Radarr")
+                            else if (tv && st.get("kSonarr").isNotEmpty()) pushDirect(st.base(8989), st.get("kSonarr"), r, "Sonarr")
+                            else {
+                                val body = JSONObject().put("guid", r.guid).put("indexerId", r.indexerId).toString()
+                                val res = Net.call("POST", st.base(9696) + "/api/v1/search", st.get("kProwlarr"), body, 30000)
+                                if (res.ok) null else "Prowlarr " + res.code
+                            }
+                        } catch (e: Exception) { e.message ?: "erreur" }
+                        if (msg == null) ok++ else fails.add(r.title.take(40) + " : " + msg)
+                    }
+                    ui {
+                        selected.clear(); updateBar(); render()
+                        setStatus("$ok envoyé(s)" + (if (fails.isEmpty()) "." else ", " + fails.size + " refusé(s) :\n" + fails.take(4).joinToString("\n")))
+                    }
+                }
+            }.setNegativeButton("Annuler", null).show()
+    }
+
+    // null = accepté, sinon la raison du refus
+    private fun pushDirect(base: String, key: String, r: Rel, who: String): String? {
+        val push = JSONObject().put("title", r.title).put("protocol", "torrent").put("size", r.size).put("indexer", r.indexer)
+        if (r.date.isNotEmpty()) push.put("publishDate", r.date)
+        if (r.magnetUrl.isNotEmpty()) push.put("magnetUrl", r.magnetUrl) else push.put("downloadUrl", r.downloadUrl)
+        val res = Net.call("POST", "$base/api/v3/release/push", key, push.toString(), 60000)
+        if (!res.ok) return who + " HTTP " + res.code
+        try {
+            val o = JSONArray(res.body).optJSONObject(0)
+            if (o != null && (o.optBoolean("rejected", false) || reasonsOf(o).isNotEmpty())) {
+                val rs = reasonsOf(o)
+                return who + " : " + (if (rs.isEmpty()) "refusé" else rs.first())
+            }
+        } catch (e: Exception) { }
+        return null
     }
 
     private fun ui(f: () -> Unit) { a.runOnUiThread { f() } }
@@ -181,6 +321,7 @@ class SearchTab(private val a: Activity, private val st: Settings) {
     private fun videoOnly(): Boolean = st.get("videoOnly") != "0"
 
     private fun render() {
+        ensureLib()
         chips.removeAllViews()
         results.removeAllViews()
         val vo = videoOnly()
@@ -207,6 +348,7 @@ class SearchTab(private val a: Activity, private val st: Settings) {
             .take(100)
         for (r in shown) results.addView(card(r))
         if (shown.isEmpty()) results.addView(a.tv("Aucun résultat.", 14f, Pal.MUTED))
+        else results.addView(a.tv("Appui long sur un résultat pour en sélectionner plusieurs.", 13f, Pal.MUTED), 0)
     }
 
     // Fenêtre de filtres : chaque choix s'applique tout de suite à la liste
@@ -298,6 +440,11 @@ class SearchTab(private val a: Activity, private val st: Settings) {
         if (r.quality().isNotEmpty()) tag(r.quality(), Pal.BLUE)
         if (r.lang().isNotEmpty()) tag(r.lang(), if (r.lang() == "VOSTFR") Pal.MUTED else Pal.GREEN)
         tag(r.indexer, Pal.MUTED)
+        when (libState(r)) {
+            "file" -> tag("Déjà dans la bibliothèque", Pal.GREEN)
+            "series" -> tag("Série déjà suivie", Pal.GREEN)
+            "tracked" -> tag("Suivi, pas encore téléchargé", Pal.MUTED)
+        }
         if (r.date.length >= 10) tag(r.date.take(10), Pal.MUTED)
         c.addView(bl)
         val row = LinearLayout(a)
@@ -315,6 +462,9 @@ class SearchTab(private val a: Activity, private val st: Settings) {
         b("Film", Pal.BLUE) { flowMovie(r) }
         b("Série", Pal.BLUE) { flowSeries(r) }
         c.addView(row)
+        c.background = a.rounded(Pal.CARD, 16, if (selected.contains(r.guid)) Pal.BLUE else Pal.BORDER)
+        c.setOnLongClickListener { toggle(r, c); true }
+        c.setOnClickListener { if (selected.isNotEmpty()) toggle(r, c) }
         return c
     }
 

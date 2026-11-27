@@ -39,10 +39,12 @@ class MediaTab(private val a: Activity, private val st: Settings) {
         val recents = a.foldable(col, "Ajouts récents", st, "recent", true)
         recentBox.orientation = LinearLayout.VERTICAL
         recents.addView(recentBox)
+        col.addView(a.rowItem("Continuer à regarder", "Reprendre un film ou un épisode commencé") { LibraryUi5.resume(a, st) })
         col.addView(a.rowItem("Télécommande", "Piloter la télévision ou un autre appareil Jellyfin") { RemoteUi.open(a, st) })
         val tools = a.foldable(col, "Outils de bibliothèque", st, "tools", false)
         tools.addView(a.rowItem("Que regarder ce soir", "Films non vus, tirés au hasard") { LibraryUi3.tonight(a, st) })
         tools.addView(a.rowItem("Suivi des séries", "Prochains épisodes, recherche des manquants") { LibraryUi2.follow(a, st) })
+        tools.addView(a.rowItem("Compléter les sagas", "Films manquants des sagas que tu as") { LibraryUi5.sagas(a, st) })
         tools.addView(a.rowItem("Stockage", "Espace libre et plus gros contenus") { LibraryUi.storage(a, st) })
         tools.addView(a.rowItem("Nettoyage", "Films vus depuis plus de 3 mois") { LibraryUi3.cleanup(a, st) })
         tools.addView(a.rowItem("Qualité et doublons", "Films sous 720p, titres en double") { LibraryUi2.quality(a, st) })

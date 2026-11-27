@@ -32,13 +32,13 @@ object Remote {
     fun command(st: Settings, id: String, cmd: String): Boolean = Jellyfin.post(st, "/Sessions/$id/Command/$cmd").ok
     fun seek(st: Settings, id: String, ticks: Long): Boolean =
         Jellyfin.post(st, "/Sessions/$id/Playing/Seek?seekPositionTicks=" + maxOf(0L, ticks)).ok
-    fun play(st: Settings, id: String, itemId: String): Boolean =
-        Jellyfin.post(st, "/Sessions/$id/Playing?playCommand=PlayNow&itemIds=$itemId").ok
+    fun play(st: Settings, id: String, itemId: String, startTicks: Long = 0L): Boolean =
+        Jellyfin.post(st, "/Sessions/$id/Playing?playCommand=PlayNow&itemIds=$itemId" + (if (startTicks > 0) "&startPositionTicks=$startTicks" else "")).ok
 }
 
 object RemoteUi {
     // Choisit l'appareil (si plusieurs) puis lance le film dessus
-    fun playOn(a: Activity, st: Settings, itemId: String, title: String) {
+    fun playOn(a: Activity, st: Settings, itemId: String, title: String, startTicks: Long = 0L) {
         thread {
             val s = try { Remote.sessions(st) } catch (e: Exception) { null }
             a.runOnUiThread {
@@ -49,7 +49,7 @@ object RemoteUi {
                 }
                 val go = { x: Remote.Sess ->
                     thread {
-                        val ok = try { Remote.play(st, x.id, itemId) } catch (e: Exception) { false }
+                        val ok = try { Remote.play(st, x.id, itemId, startTicks) } catch (e: Exception) { false }
                         a.runOnUiThread { android.widget.Toast.makeText(a, if (ok) "Lecture lancée sur " + x.name else "Échec", android.widget.Toast.LENGTH_SHORT).show() }
                     }
                 }
