@@ -62,9 +62,20 @@ class WatchService : Service() {
                 Jellyfin.refresh(st)
                 Thread.sleep(120000)
                 Jellyfin.refresh(st)
+                Subs.autoRecent(st)
             }
         }
         var lastDisk = 0L
+        client.onStalled = { names ->
+            val nm = getSystemService(NotificationManager::class.java)
+            for (name in names) {
+                counter++
+                val n = builder("done").setSmallIcon(android.R.drawable.stat_notify_error)
+                    .setContentTitle("Téléchargement bloqué").setContentText(name + " n'avance plus depuis 30 min")
+                    .setContentIntent(openApp()).setAutoCancel(true).build()
+                nm.notify(1000 + counter, n)
+            }
+        }
         while (running) {
             val now = System.currentTimeMillis()
             if (now - lastDisk > 1800000L) {

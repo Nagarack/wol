@@ -12,6 +12,11 @@ class QbClient(private val st: Settings) {
     private var failMsg = ""
 
     var onComplete: ((List<String>) -> Unit)? = null
+    var onStalled: ((List<String>) -> Unit)? = null
+    // Torrents sans progression depuis 30 min (hash en majuscules)
+    val stalled = HashSet<String>()
+    private val track = HashMap<String, Pair<Double, Long>>()
+    private val warned = HashSet<String>()
     private var seen: HashMap<String, Boolean>? = null
 
     class Result(val err: String, val data: JSONArray)
@@ -119,6 +124,24 @@ class QbClient(private val st: Settings) {
                 if (prev != null && done && prev[h] == false) finished.add(o.optString("name"))
             }
             seen = now
+            val t0 = System.currentTimeMillis()
+            val fresh = ArrayList<String>()
+            stalled.clear()
+            for (i in 0 until arr.length()) {
+                val o = arr.optJSONObject(i) ?: continue
+                val h = o.optString("hash").uppercase()
+                val p = o.optDouble("progress", 0.0)
+                val s = o.optString("state")
+                val active = p < 1.0 && (s == "downloading" || s == "stalledDL" || s == "metaDL" || s == "forcedDL")
+                if (!active) { track.remove(h); continue }
+                val old = track[h]
+                if (old == null || p > old.first) { track[h] = Pair(p, t0); warned.remove(h) }
+                else if (t0 - old.second >= 1800000L && o.optLong("dlspeed", 0L) < 1000L) {
+                    stalled.add(h)
+                    if (warned.add(h)) fresh.add(o.optString("name"))
+                }
+            }
+            if (fresh.isNotEmpty()) onStalled?.invoke(fresh)
             if (finished.isNotEmpty()) onComplete?.invoke(finished)
             return Result("", arr)
         } catch (e: Exception) {

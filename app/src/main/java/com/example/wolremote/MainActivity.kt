@@ -58,6 +58,7 @@ class MainActivity : Activity() {
                 Jellyfin.refresh(st)
                 Thread.sleep(120000)
                 Jellyfin.refresh(st)
+                Subs.autoRecent(st)
             }
         }
         queue = QueueTab(this, st, qbc)

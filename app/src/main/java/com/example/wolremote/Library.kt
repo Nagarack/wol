@@ -119,6 +119,21 @@ object Subs {
         return out
     }
 
+    // Après un téléchargement : cherche les sous-titres français des derniers ajouts qui n'en ont pas
+    fun autoRecent(st: Settings) {
+        if (st.get("kAutoSubs") == "0" || st.get("kJellyfin").isEmpty()) return
+        try {
+            val r = Jellyfin.get(st, "/Items?IncludeItemTypes=Movie,Episode&Recursive=true&Fields=MediaStreams&SortBy=DateCreated&SortOrder=Descending&Limit=8", 20000)
+            if (!r.ok) return
+            val a = JSONObject(r.body).optJSONArray("Items") ?: return
+            for (i in 0 until a.length()) {
+                val o = a.optJSONObject(i) ?: continue
+                if (!hasFrench(o)) fetch(st, o.str("Id"))
+            }
+        } catch (e: Exception) {
+        }
+    }
+
     // Télécharge le meilleur sous-titre trouvé ; renvoie null si OK, sinon le motif
     fun fetch(st: Settings, id: String): String? {
         for (lang in listOf("fra", "fre")) {
@@ -276,7 +291,7 @@ object Quality {
 object Follow {
     class Next(val series: String, val label: String)
 
-    private fun userId(st: Settings): String {
+    fun userId(st: Settings): String {
         val r = Jellyfin.get(st, "/Users")
         if (!r.ok) throw Exception("Jellyfin : HTTP " + r.code)
         val a = JSONArray(r.body)
@@ -404,5 +419,142 @@ object LibraryUi2 {
                 a.runOnUiThread { info.text = "Erreur : " + e.message }
             }
         }
+    }
+}
+
+// Nettoyage : films déjà vus il y a longtemps (Jellyfin) ↔ fichiers dans Radarr
+object Cleanup {
+    fun candidates(st: Settings, months: Int = 3): List<Storage.Entry> {
+        val kr = st.get("kRadarr")
+        if (kr.isEmpty()) throw Exception("clé Radarr manquante (Réglages)")
+        val rr = Net.call("GET", st.base(7878) + "/api/v3/movie", kr, timeout = 20000)
+        if (!rr.ok) throw Exception("Radarr : HTTP " + rr.code)
+        val map = HashMap<String, Storage.Entry>()
+        val ra = JSONArray(rr.body)
+        for (i in 0 until ra.length()) {
+            val o = ra.optJSONObject(i) ?: continue
+            val s = o.optLong("sizeOnDisk", 0L)
+            if (s > 0) map[o.str("title").lowercase() + "|" + o.optInt("year")] = Storage.Entry("movie", o.optInt("id"), o.str("title") + " (" + o.optInt("year") + ")", s)
+        }
+        val uid = Follow.userId(st)
+        val r = Jellyfin.get(st, "/Users/$uid/Items?IncludeItemTypes=Movie&Recursive=true&IsPlayed=true&Limit=1000", 30000)
+        if (!r.ok) throw Exception("Jellyfin : HTTP " + r.code)
+        val cutoff = java.time.Instant.now().minus(months * 30L, java.time.temporal.ChronoUnit.DAYS).toString()
+        val a = JSONObject(r.body).optJSONArray("Items") ?: return emptyList()
+        val out = ArrayList<Storage.Entry>()
+        for (i in 0 until a.length()) {
+            val o = a.optJSONObject(i) ?: continue
+            val last = o.optJSONObject("UserData")?.str("LastPlayedDate") ?: ""
+            if (last.isEmpty() || last >= cutoff) continue
+            val e = map[o.str("Name").lowercase() + "|" + o.optInt("ProductionYear")] ?: continue
+            out.add(e)
+        }
+        return out.sortedByDescending { it.size }
+    }
+}
+
+// Que regarder ce soir : films non vus tirés au hasard
+object Tonight {
+    class Movie(val id: String, val title: String, val minutes: Int, val rating: Double)
+
+    fun pick(st: Settings, minMin: Int, maxMin: Int): List<Movie> {
+        val uid = Follow.userId(st)
+        val r = Jellyfin.get(st, "/Users/$uid/Items?IncludeItemTypes=Movie&Recursive=true&IsPlayed=false&SortBy=Random&Limit=60&Fields=RunTimeTicks", 20000)
+        if (!r.ok) throw Exception("Jellyfin : HTTP " + r.code)
+        val a = JSONObject(r.body).optJSONArray("Items") ?: return emptyList()
+        val out = ArrayList<Movie>()
+        for (i in 0 until a.length()) {
+            val o = a.optJSONObject(i) ?: continue
+            val min = (o.optLong("RunTimeTicks", 0L) / 600000000L).toInt()
+            if (min < minMin || min > maxMin) continue
+            out.add(Movie(o.str("Id"), o.str("Name") + (if (o.optInt("ProductionYear") > 0) " (" + o.optInt("ProductionYear") + ")" else ""), min, o.optDouble("CommunityRating", 0.0)))
+            if (out.size >= 5) break
+        }
+        return out
+    }
+}
+
+object LibraryUi3 {
+    fun cleanup(a: Activity, st: Settings) {
+        val body = LinearLayout(a); body.orientation = LinearLayout.VERTICAL
+        val info = a.tv("Analyse…", 14f, Pal.MUTED)
+        body.addView(info)
+        val sv = ScrollView(a); body.setPadding(a.dp(16), a.dp(8), a.dp(16), a.dp(8)); sv.addView(body)
+        a.dialogBuilder().setTitle("Nettoyage").setView(sv).setPositiveButton("Fermer", null).show()
+        thread {
+            try {
+                val c = Cleanup.candidates(st)
+                a.runOnUiThread {
+                    info.text = if (c.isEmpty()) "Aucun film vu depuis plus de 3 mois." else c.size.toString() + " film(s) vus il y a plus de 3 mois, " + fmtSize(c.sumOf { it.size }) + " à récupérer. Touche pour supprimer."
+                    for (e in c) {
+                        val row = a.tv(fmtSize(e.size) + "   " + e.title, 14f, Pal.FG)
+                        row.setPadding(0, a.dp(10), 0, a.dp(10))
+                        row.setOnClickListener {
+                            a.dialogBuilder().setMessage("Supprimer « " + e.title + " » et son fichier ? C'est définitif.")
+                                .setPositiveButton("Supprimer") { _, _ ->
+                                    thread {
+                                        val ok = try { Storage.delete(st, e) } catch (x: Exception) { false }
+                                        a.runOnUiThread {
+                                            row.text = (if (ok) "Supprimé : " else "Échec : ") + e.title
+                                            row.setTextColor(Pal.MUTED)
+                                            row.setOnClickListener(null)
+                                        }
+                                    }
+                                }.setNegativeButton("Annuler", null).show()
+                        }
+                        body.addView(row)
+                    }
+                }
+            } catch (x: Exception) {
+                a.runOnUiThread { info.text = "Erreur : " + x.message }
+            }
+        }
+    }
+
+    fun tonight(a: Activity, st: Settings) {
+        val body = LinearLayout(a); body.orientation = LinearLayout.VERTICAL
+        body.setPadding(a.dp(16), a.dp(8), a.dp(16), a.dp(8))
+        val list = LinearLayout(a); list.orientation = LinearLayout.VERTICAL
+        val info = a.tv("", 14f, Pal.MUTED)
+        fun load(lo: Int, hi: Int) {
+            info.text = "Recherche…"
+            list.removeAllViews()
+            thread {
+                try {
+                    val m = Tonight.pick(st, lo, hi)
+                    a.runOnUiThread {
+                        info.text = if (m.isEmpty()) "Aucun film non vu dans cette durée." else ""
+                        for (x in m) {
+                            val row = LinearLayout(a); row.orientation = LinearLayout.HORIZONTAL
+                            row.setPadding(0, a.dp(8), 0, a.dp(8))
+                            val img = android.widget.ImageView(a)
+                            img.scaleType = android.widget.ImageView.ScaleType.CENTER_CROP
+                            img.setBackgroundColor(Pal.CARD2)
+                            row.addView(img, LinearLayout.LayoutParams(a.dp(64), a.dp(96)))
+                            Img.load(st.base(8096) + "/Items/" + x.id + "/Images/Primary?maxHeight=300&quality=80", img)
+                            val t = LinearLayout(a); t.orientation = LinearLayout.VERTICAL
+                            t.setPadding(a.dp(12), 0, 0, 0)
+                            t.addView(a.tv(x.title, 15f, Pal.FG))
+                            t.addView(a.tv((x.minutes / 60).toString() + " h " + String.format("%02d", x.minutes % 60) + (if (x.rating > 0) "  ·  " + String.format(Locale.FRANCE, "%.1f", x.rating) + "/10" else ""), 13f, Pal.MUTED))
+                            row.addView(t, LinearLayout.LayoutParams(0, WRAP, 1f))
+                            list.addView(row)
+                        }
+                    }
+                } catch (x: Exception) {
+                    a.runOnUiThread { info.text = "Erreur : " + x.message }
+                }
+            }
+        }
+        val bar = LinearLayout(a); bar.orientation = LinearLayout.HORIZONTAL
+        for ((lbl, lo, hi) in listOf(Triple("Tous", 0, 999), Triple("Court", 0, 105), Triple("Long", 120, 999))) {
+            val b = a.btn2(lbl, Pal.FG, 44) { load(lo, hi) }
+            bar.addView(b, LinearLayout.LayoutParams(0, WRAP, 1f))
+        }
+        body.addView(bar)
+        body.addView(info)
+        body.addView(list)
+        val sv = ScrollView(a); sv.addView(body)
+        a.dialogBuilder().setTitle("Ce soir").setView(sv).setPositiveButton("Fermer", null).show()
+        load(0, 999)
     }
 }

@@ -43,6 +43,8 @@ class MediaTab(private val a: Activity, private val st: Settings) {
         col.addView(a.btn2("Stockage et gros contenus") { LibraryUi.storage(a, st) })
         col.addView(a.btn2("Sous-titres français manquants") { LibraryUi.subtitles(a, st) })
         col.addView(a.btn2("Suivi des séries") { LibraryUi2.follow(a, st) })
+        col.addView(a.btn2("Que regarder ce soir") { LibraryUi3.tonight(a, st) })
+        col.addView(a.btn2("Nettoyage des films déjà vus") { LibraryUi3.cleanup(a, st) })
         col.addView(a.btn2("Qualité et doublons") { LibraryUi2.quality(a, st) })
         col.addView(a.section("Raccourcis"))
         col.addView(link("Jellyfin", 8096, Pal.PURPLE))

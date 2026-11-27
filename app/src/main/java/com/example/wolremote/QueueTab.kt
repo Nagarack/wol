@@ -17,7 +17,11 @@ class QueueTab(private val a: Activity, private val st: Settings, private val qb
     private val list = LinearLayout(a)
     private var busy = false
 
-    private class Item(val who: String, val title: String, var pct: Int, var extra: String, val hash: String)
+    private class Item(val who: String, val title: String, var pct: Int, var extra: String, val hash: String) {
+        var qid = 0
+        var port = 0
+        var keyName = ""
+    }
 
     init {
         view.isFillViewport = true
@@ -53,7 +57,11 @@ class QueueTab(private val a: Activity, private val st: Settings, private val qb
                 val pct = if (size > 0) ((size - left) / size * 100).toInt() else 0
                 val tl = o.str("timeleft")
                 val status = o.str("status")
-                items.add(Item(who, o.str("title"), pct, status + (if (tl.isNotEmpty()) " · reste $tl" else ""), o.str("downloadId").uppercase()))
+                val it2 = Item(who, o.str("title"), pct, status + (if (tl.isNotEmpty()) " · reste $tl" else ""), o.str("downloadId").uppercase())
+                it2.qid = o.optInt("id")
+                it2.port = port
+                it2.keyName = keyName
+                items.add(it2)
             }
         } catch (e: Exception) {
             errs.add("$who : injoignable")
@@ -99,6 +107,20 @@ class QueueTab(private val a: Activity, private val st: Settings, private val qb
                     c.addView(a.tv(item.title, 14f, Pal.FG))
                     c.addView(a.progress(item.pct))
                     c.addView(a.tv(item.who + " · " + item.pct + " % · " + item.extra, 12f, Pal.MUTED))
+                    if (item.hash.isNotEmpty() && qb.stalled.contains(item.hash)) {
+                        c.addView(a.tv("Bloqué depuis plus de 30 min", 13f, Pal.RED))
+                        c.addView(a.btn2("Retirer et chercher autre chose", Pal.FG, 44) {
+                            a.dialogBuilder().setMessage("Retirer ce téléchargement, l'ajouter à la liste noire et relancer une recherche ?")
+                                .setPositiveButton("Confirmer") { _, _ ->
+                                    thread {
+                                        val ok = try {
+                                            Net.call("DELETE", st.base(item.port) + "/api/v3/queue/" + item.qid + "?removeFromClient=true&blocklist=true", st.get(item.keyName), timeout = 15000).ok
+                                        } catch (e: Exception) { false }
+                                        a.runOnUiThread { info.text = if (ok) "Retiré : une nouvelle recherche est lancée." else "Échec du retrait." }
+                                    }
+                                }.setNegativeButton("Annuler", null).show()
+                        })
+                    }
                     list.addView(c)
                 }
             }
