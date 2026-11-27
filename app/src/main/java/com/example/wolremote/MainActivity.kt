@@ -35,6 +35,7 @@ class MainActivity : Activity() {
     private lateinit var qb: QbTab
     private lateinit var media: MediaTab
     private lateinit var settingsTab: SettingsTab
+    private lateinit var searchTab: SearchTab
     private lateinit var views: List<View>
     private lateinit var navs: List<TextView>
     private var current = -1
@@ -57,7 +58,8 @@ class MainActivity : Activity() {
         window.navigationBarColor = Pal.CARD
         window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
 
-        val search = SearchTab(this, st)
+        searchTab = SearchTab(this, st)
+        val search = searchTab
         val qbc = QbClient(st)
         // Un téléchargement vient de se terminer : on laisse à Radarr/Sonarr le temps d'importer, puis on force Jellyfin
         // (si la surveillance en arrière-plan est active, c'est elle qui s'en charge)
@@ -139,6 +141,7 @@ class MainActivity : Activity() {
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: android.content.Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         settingsTab.onResult(requestCode, resultCode, data)
+        searchTab.onResult(requestCode, resultCode, data)
     }
 
     private val power by lazy { PowerCard(this, st) }

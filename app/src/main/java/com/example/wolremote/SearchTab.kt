@@ -1,7 +1,9 @@
 package com.example.wolremote
 
 import android.app.Activity
+import android.content.Intent
 import android.graphics.Color
+import android.speech.RecognizerIntent
 import android.graphics.drawable.GradientDrawable
 import android.text.InputType
 import android.view.Gravity
@@ -27,6 +29,9 @@ class SearchTab(private val a: Activity, private val st: Settings) {
     private val results = LinearLayout(a)
     private var all: List<Rel> = emptyList()
     private var filter = ""
+    private var kind = st.get("sKind")        // "" = tout, "movie", "tv"
+    private var lastQuery = ""
+    private val dups = HashMap<String, Int>() // guid -> nombre d'indexeurs proposant la même release
     // Bibliothèque (Radarr / Sonarr) pour repérer ce qu'on a déjà ; sélection multiple
     private var libMovies: List<Pair<String, Int>> = emptyList()   // titre normalisé, année
     private var libHas: Set<String> = emptySet()                    // titre normalisé + année des films déjà téléchargés
@@ -75,6 +80,30 @@ class SearchTab(private val a: Activity, private val st: Settings) {
         sr.addView(sb)
         header.addView(sr)
 
+        // Type de recherche : cible les catégories de Prowlarr pour réduire le bruit
+        val kindRow = LinearLayout(a)
+        kindRow.orientation = LinearLayout.HORIZONTAL
+        kindRow.setPadding(0, a.dp(10), 0, 0)
+        fun kindChips() {
+            kindRow.removeAllViews()
+            for ((lbl, v) in listOf("Tout" to "", "Films" to "movie", "Séries" to "tv")) {
+                val sel = kind == v
+                val t = a.tv(lbl, 14f, if (sel) Color.WHITE else Pal.MUTED)
+                t.setPadding(a.dp(14), a.dp(8), a.dp(14), a.dp(8))
+                t.background = a.rounded(if (sel) Pal.BLUE else Pal.CARD, 20, if (sel) Pal.BLUE else Pal.BORDER)
+                t.setOnClickListener { kind = v; st.put("sKind", v); kindChips() }
+                val lp = LinearLayout.LayoutParams(WRAP, WRAP); lp.rightMargin = a.dp(8)
+                kindRow.addView(t, lp)
+            }
+            val mic = a.tv("Dicter", 14f, Pal.FG)
+            mic.setPadding(a.dp(14), a.dp(8), a.dp(14), a.dp(8))
+            mic.background = a.rounded(Pal.CARD, 20, Pal.BORDER)
+            mic.setOnClickListener { dictate() }
+            kindRow.addView(mic)
+        }
+        kindChips()
+        header.addView(kindRow)
+
         header.addView(a.btn2("Réveiller le PC et chercher", Pal.FG, 46) { wakeAndSearch() })
 
         val hs = HorizontalScrollView(a)
@@ -92,7 +121,7 @@ class SearchTab(private val a: Activity, private val st: Settings) {
         sc.isVerticalScrollBarEnabled = false
         results.orientation = LinearLayout.VERTICAL
         results.setPadding(a.dp(16), 0, a.dp(16), a.dp(16))
-        results.addView(a.tv("Saisis un titre puis touche Chercher. Si le PC est éteint, utilise « Réveiller le PC et chercher ».", 14f, Pal.MUTED))
+        showHistory()
         sc.addView(results)
         view.addView(sc, LinearLayout.LayoutParams(MATCH, 0, 1f))
 
@@ -111,6 +140,49 @@ class SearchTab(private val a: Activity, private val st: Settings) {
         send.layoutParams = slp2
         bar.addView(send)
         view.addView(bar, LinearLayout.LayoutParams(MATCH, WRAP))
+    }
+
+    // ---------- Historique, dictée ----------
+    private fun history(): List<String> = st.get("sHist").split("\n").filter { it.isNotBlank() }
+
+    private fun addHistory(q: String) {
+        val l = listOf(q) + history().filter { !it.equals(q, true) }
+        st.put("sHist", l.take(8).joinToString("\n"))
+    }
+
+    private fun showHistory() {
+        results.removeAllViews()
+        val h = history()
+        results.addView(a.tv("Saisis un titre puis touche Chercher. Si le PC est éteint, utilise « Réveiller le PC et chercher ».", 14f, Pal.MUTED))
+        if (h.isEmpty()) return
+        results.addView(a.section("Recherches récentes"))
+        for (q in h) {
+            val row = a.rowItem(q, "") { query.setText(q); search() }
+            results.addView(row)
+        }
+        val clear = a.tv("Effacer l'historique", 13f, Pal.MUTED)
+        clear.setPadding(a.dp(2), a.dp(14), 0, a.dp(8))
+        clear.setOnClickListener { st.put("sHist", ""); showHistory() }
+        results.addView(clear)
+    }
+
+    private fun dictate() {
+        try {
+            val i = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+            i.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            i.putExtra(RecognizerIntent.EXTRA_LANGUAGE, "fr-FR")
+            i.putExtra(RecognizerIntent.EXTRA_PROMPT, "Titre à chercher")
+            @Suppress("DEPRECATION")
+            a.startActivityForResult(i, 81)
+        } catch (e: Exception) {
+            setStatus("Reconnaissance vocale indisponible sur ce téléphone.")
+        }
+    }
+
+    fun onResult(req: Int, res: Int, data: Intent?) {
+        if (req != 81 || res != Activity.RESULT_OK) return
+        val t = data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()
+        if (!t.isNullOrEmpty()) { query.setText(t); search() }
     }
 
     private fun norm(s: String): String =
@@ -291,6 +363,8 @@ class SearchTab(private val a: Activity, private val st: Settings) {
         a.hideKeyboard()
         val q = query.text.toString().trim()
         if (q.isEmpty()) { setStatus("Saisis une recherche."); return }
+        lastQuery = q
+        addHistory(q)
         val key = st.get("kProwlarr")
         if (key.isEmpty()) { setStatus("Renseigne la clé API de Prowlarr dans Réglages."); return }
         setStatus("Recherche en cours…")
@@ -300,7 +374,7 @@ class SearchTab(private val a: Activity, private val st: Settings) {
                     ui { setStatus("PC injoignable. Utilise « Réveiller et chercher ».") }
                     return@thread
                 }
-                val r = Net.call("GET", st.base(9696) + "/api/v1/search?query=" + Net.enc(q) + "&type=search", key, timeout = 120000)
+                val r = Net.call("GET", st.base(9696) + "/api/v1/search?query=" + Net.enc(q) + "&type=search" + (if (kind == "movie") "&categories=2000" else if (kind == "tv") "&categories=5000" else ""), key, timeout = 120000)
                 if (!r.ok) {
                     ui { setStatus("Erreur Prowlarr (" + r.code + ") : " + r.body.take(200)) }
                     return@thread
@@ -325,9 +399,14 @@ class SearchTab(private val a: Activity, private val st: Settings) {
         chips.removeAllViews()
         results.removeAllViews()
         val vo = videoOnly()
-        val vis = all.filter { !vo || it.isVideo() }
-        val hidden = all.size - vis.size
-        setStatus(vis.size.toString() + " résultat(s)" + (if (hidden > 0) " · $hidden masqué(s) (jeux, musique, logiciels…)" else ""))
+        val strict = st.get("sStrict") != "0" && lastQuery.isNotEmpty()
+        val toks = lastQuery.split(Regex("\\s+")).map { norm(it) }.filter { it.length >= 2 || it.all { c -> c.isDigit() } }.filter { it.isNotEmpty() }
+        val vis0 = all.filter { !vo || it.isVideo() }
+        val vis = if (strict && toks.isNotEmpty()) vis0.filter { r -> val n = norm(r.title); toks.all { n.contains(it) } } else vis0
+        val offTopic = vis0.size - vis.size
+        val hidden = all.size - vis0.size
+        setStatus(vis.size.toString() + " résultat(s)" + (if (hidden > 0) " · $hidden masqué(s) (jeux, musique, logiciels…)" else "") +
+            (if (offTopic > 0) " · $offTopic hors sujet" else ""))
         val nf = listOf(fQ.isNotEmpty(), fL.isNotEmpty(), fS != 0, fSort != "seeders").count { it }
         val fc = a.tv(if (nf > 0) "Filtres ($nf)" else "Filtres", 14f, Color.WHITE)
         fc.setPadding(a.dp(14), a.dp(8), a.dp(14), a.dp(8))
@@ -337,6 +416,13 @@ class SearchTab(private val a: Activity, private val st: Settings) {
         flp.rightMargin = a.dp(8)
         chips.addView(fc, flp)
         addToggleChip("Films / séries / animés seulement", vo)
+        val sc2 = a.tv(if (strict) "✓ Titre exact" else "Titre exact", 14f, Color.WHITE)
+        sc2.setPadding(a.dp(14), a.dp(8), a.dp(14), a.dp(8))
+        sc2.background = a.rounded(if (strict) Pal.GREEN else Pal.GRAY, 20)
+        sc2.setOnClickListener { st.put("sStrict", if (strict) "0" else "1"); render() }
+        val slp3 = LinearLayout.LayoutParams(WRAP, WRAP)
+        slp3.rightMargin = a.dp(8)
+        chips.addView(sc2, slp3)
         val names = vis.map { it.indexer }.distinct().sorted()
         addChip("Tous (" + vis.size + ")", "")
         for (n in names) addChip(n + " (" + vis.count { it.indexer == n } + ")", n)
@@ -344,6 +430,13 @@ class SearchTab(private val a: Activity, private val st: Settings) {
             .filter { fQ.isEmpty() || it.quality() == fQ }
             .filter { fL.isEmpty() || (fL == "vf" && (it.lang() == "VF" || it.lang() == "MULTI")) || (fL == "vostfr" && it.lang() == "VOSTFR") }
             .filter { fS == 0 || it.size <= fS * 1000000000L }
+            .let { l ->
+                // une même release proposée par plusieurs indexeurs n'est affichée qu'une fois
+                dups.clear()
+                val g = l.groupBy { norm(it.title) }
+                val best = g.values.map { grp -> val b = grp.maxByOrNull { it.seeders }!!; dups[b.guid] = grp.map { it.indexer }.distinct().size; b }
+                best
+            }
             .let { l -> when (fSort) { "size" -> l.sortedBy { it.size }; "date" -> l.sortedByDescending { it.date }; else -> l.sortedByDescending { it.seeders } } }
             .take(100)
         for (r in shown) results.addView(card(r))
@@ -439,7 +532,7 @@ class SearchTab(private val a: Activity, private val st: Settings) {
         tag(r.seeders.toString() + " seeders", sc)
         if (r.quality().isNotEmpty()) tag(r.quality(), Pal.BLUE)
         if (r.lang().isNotEmpty()) tag(r.lang(), if (r.lang() == "VOSTFR") Pal.MUTED else Pal.GREEN)
-        tag(r.indexer, Pal.MUTED)
+        tag(if ((dups[r.guid] ?: 1) > 1) r.indexer + " +" + ((dups[r.guid] ?: 1) - 1) else r.indexer, Pal.MUTED)
         when (libState(r)) {
             "file" -> tag("Déjà dans la bibliothèque", Pal.GREEN)
             "series" -> tag("Série déjà suivie", Pal.GREEN)
