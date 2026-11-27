@@ -55,14 +55,14 @@ class SearchTab(private val a: Activity, private val st: Settings) {
         val qlp = LinearLayout.LayoutParams(0, WRAP, 1f)
         qlp.topMargin = 0
         sr.addView(query, qlp)
-        val sb = a.btn("🔍", Pal.BLUE, 48) { search() }
+        val sb = a.btn("Chercher", Pal.BLUE, 48) { search() }
         val slp = LinearLayout.LayoutParams(a.dp(56), a.dp(48))
         slp.leftMargin = a.dp(8)
         sb.layoutParams = slp
         sr.addView(sb)
         header.addView(sr)
 
-        header.addView(a.btn("⏻  Réveiller le PC et chercher", Pal.GREEN, 46) { wakeAndSearch() })
+        header.addView(a.btn2("Réveiller le PC et chercher", Pal.FG, 46) { wakeAndSearch() })
 
         val hs = HorizontalScrollView(a)
         hs.isHorizontalScrollBarEnabled = false
@@ -79,7 +79,7 @@ class SearchTab(private val a: Activity, private val st: Settings) {
         sc.isVerticalScrollBarEnabled = false
         results.orientation = LinearLayout.VERTICAL
         results.setPadding(a.dp(16), 0, a.dp(16), a.dp(16))
-        results.addView(a.tv("Saisis un titre puis touche 🔍. Si le PC est éteint, utilise « Réveiller le PC et chercher ».", 14f, Pal.MUTED))
+        results.addView(a.tv("Saisis un titre puis touche Chercher. Si le PC est éteint, utilise « Réveiller le PC et chercher ».", 14f, Pal.MUTED))
         sc.addView(results)
         view.addView(sc, LinearLayout.LayoutParams(MATCH, 0, 1f))
     }
@@ -183,7 +183,7 @@ class SearchTab(private val a: Activity, private val st: Settings) {
         val vis = all.filter { !vo || it.isVideo() }
         val hidden = all.size - vis.size
         setStatus(vis.size.toString() + " résultat(s)" + (if (hidden > 0) " · $hidden masqué(s) (jeux, musique, logiciels…)" else ""))
-        addToggleChip("🎬 Films / séries / animés seulement", vo)
+        addToggleChip("Films / séries / animés seulement", vo)
         val names = vis.map { it.indexer }.distinct().sorted()
         addChip("Tous (" + vis.size + ")", "")
         for (n in names) addChip(n + " (" + vis.count { it.indexer == n } + ")", n)
@@ -234,8 +234,8 @@ class SearchTab(private val a: Activity, private val st: Settings) {
             bl.addView(a.badge(txt, colr), lp)
         }
         tag(String.format(Locale.FRANCE, "%.2f Go", go), Pal.MUTED)
-        val sc = if (r.seeders >= 20) Pal.GREEN else if (r.seeders >= 5) Pal.AMBER else Pal.RED
-        tag("▲ " + r.seeders, sc)
+        val sc = if (r.seeders >= 20) Pal.GREEN else if (r.seeders >= 5) Pal.MUTED else Pal.RED
+        tag(r.seeders.toString() + " seeders", sc)
         tag(r.indexer, Pal.BLUE)
         if (r.date.length >= 10) tag(r.date.take(10), Pal.MUTED)
         c.addView(bl)
@@ -251,8 +251,8 @@ class SearchTab(private val a: Activity, private val st: Settings) {
             row.addView(x)
         }
         b("Autre", Pal.GRAY) { sendOther(r) }
-        b("Film", Pal.AMBER) { flowMovie(r) }
-        b("Série", Pal.PURPLE) { flowSeries(r) }
+        b("Film", Pal.BLUE) { flowMovie(r) }
+        b("Série", Pal.BLUE) { flowSeries(r) }
         c.addView(row)
         return c
     }

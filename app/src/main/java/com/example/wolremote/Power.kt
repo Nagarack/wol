@@ -75,7 +75,7 @@ class PowerCard(private val a: Activity, private val st: Settings) {
         today.setPadding(0, a.dp(10), 0, 0)
         month.setPadding(0, a.dp(2), 0, 0)
         chartTitle.setPadding(0, a.dp(14), 0, a.dp(4))
-        view.addView(a.tv("⚡ CONSOMMATION (ESTIMÉE)", 12f, Pal.MUTED))
+        view.addView(a.tv("Consommation estimée", 14f, Pal.MUTED))
         view.addView(big)
         view.addView(detail)
         view.addView(temps)
@@ -102,7 +102,7 @@ class PowerCard(private val a: Activity, private val st: Settings) {
             all.add(Pair(e.optString(0), e.optDouble(1)))
         }
         chart.data = all.takeLast(span)
-        chartTitle.text = "HISTORIQUE : $span DERNIERS JOURS (touche pour changer)"
+        chartTitle.text = "Historique : $span derniers jours (touche pour changer)"
         chart.invalidate()
     }
 
@@ -138,7 +138,7 @@ class PowerCard(private val a: Activity, private val st: Settings) {
                 if (d.optBoolean("ok")) {
                     val w = d.optInt("watts")
                     big.text = "≈ $w W"
-                    big.setTextColor(if (w > 400) Pal.AMBER else Pal.GREEN)
+                    big.setTextColor(Pal.FG)
                     detail.text = String.format(Locale.FRANCE, "CPU %d W  ·  GPU %d W  ·  base %d W (pertes alim. incluses)",
                         d.optInt("cpu"), d.optInt("gpu"), d.optInt("base"))
                     val parts = ArrayList<String>()

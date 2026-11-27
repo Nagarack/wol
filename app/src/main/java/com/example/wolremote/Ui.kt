@@ -67,9 +67,8 @@ fun Activity.title(t: String): TextView {
 }
 
 fun Activity.section(t: String): TextView {
-    val v = tv(t.uppercase(), 12f, Pal.MUTED)
+    val v = tv(t, 14f, Pal.MUTED)
     v.typeface = Typeface.DEFAULT_BOLD
-    v.letterSpacing = 0.08f
     v.setPadding(dp(2), dp(22), 0, dp(2))
     return v
 }
@@ -105,6 +104,14 @@ fun Activity.btn(label: String, color: Int, h: Int = 52, onClick: () -> Unit): B
     val lp = LinearLayout.LayoutParams(MATCH, WRAP)
     lp.topMargin = dp(10)
     b.layoutParams = lp
+    return b
+}
+
+// Bouton secondaire : contour discret, pas de remplissage (un seul bouton plein par écran)
+fun Activity.btn2(label: String, textColor: Int = Pal.FG, h: Int = 52, onClick: () -> Unit): Button {
+    val b = btn(label, Pal.CARD, h, onClick)
+    b.setTextColor(textColor)
+    b.background = RippleDrawable(ColorStateList.valueOf(Color.argb(40, 255, 255, 255)), rounded(Pal.CARD, 14, Pal.BORDER), null)
     return b
 }
 

@@ -66,7 +66,7 @@ class SettingsTab(private val a: Activity, private val st: Settings) {
         col.addView(a.section("Notifications"))
         col.addView(a.tv("Prévient quand un téléchargement est terminé, même appli fermée, et actualise Jellyfin. Une notification discrète reste affichée tant que c'est actif.", 13f, Pal.MUTED))
         val watch = a.btn("", Pal.BLUE) {}
-        fun label() { watch.text = if (st.get("kWatch") == "1") "🔔 Activées (touche pour désactiver)" else "🔕 Désactivées (touche pour activer)" }
+        fun label() { watch.text = if (st.get("kWatch") == "1") "Activées (touche pour désactiver)" else "Désactivées (touche pour activer)" }
         label()
         watch.setOnClickListener {
             if (st.get("kWatch") == "1") {

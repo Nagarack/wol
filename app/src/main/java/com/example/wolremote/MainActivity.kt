@@ -6,8 +6,6 @@ import android.graphics.Typeface
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.text.SpannableString
-import android.text.style.RelativeSizeSpan
 import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
@@ -76,14 +74,15 @@ class MainActivity : Activity() {
         nav.orientation = LinearLayout.HORIZONTAL
         nav.setBackgroundColor(Pal.CARD)
         nav.setPadding(dp(6), dp(6), dp(6), dp(6))
-        val icons = listOf("💻", "🔎", "⬇", "📦", "🎬", "⚙")
+        val icons = listOf(R.drawable.ic_pc, R.drawable.ic_search, R.drawable.ic_download, R.drawable.ic_swap, R.drawable.ic_play, R.drawable.ic_settings)
         val names = listOf("PC", "Chercher", "En cours", "qBit", "Média", "Réglages")
         val list = ArrayList<TextView>()
         for (i in icons.indices) {
-            val s = SpannableString(icons[i] + "\n" + names[i])
-            s.setSpan(RelativeSizeSpan(1.5f), 0, icons[i].length, 0)
-            val t = tv("", 11f, Pal.MUTED)
-            t.text = s
+            val t = tv(names[i], 11f, Pal.MUTED)
+            val ic = resources.getDrawable(icons[i], null).mutate()
+            ic.setBounds(0, 0, dp(24), dp(24))
+            t.setCompoundDrawables(null, ic, null, null)
+            t.compoundDrawablePadding = dp(2)
             t.gravity = Gravity.CENTER
             t.setPadding(0, dp(8), 0, dp(8))
             t.setOnClickListener { show(i) }
@@ -131,10 +130,12 @@ class MainActivity : Activity() {
         for ((k, v) in views.withIndex()) v.visibility = if (k == i) View.VISIBLE else View.GONE
         for ((k, t) in navs.withIndex()) {
             if (k == i) {
-                t.setTextColor(Color.WHITE)
+                t.setTextColor(Pal.BLUE)
+                t.compoundDrawables[1]?.setTint(Pal.BLUE)
                 t.background = rounded(Pal.CARD2, 12)
             } else {
                 t.setTextColor(Pal.MUTED)
+                t.compoundDrawables[1]?.setTint(Pal.MUTED)
                 t.background = null
             }
         }
@@ -179,7 +180,7 @@ class MainActivity : Activity() {
         status = tv("Vérification…", 28f, Pal.MUTED)
         status.typeface = Typeface.DEFAULT_BOLD
         status.gravity = Gravity.CENTER
-        game = tv("● Chroniques …", 16f, Pal.MUTED)
+        game = tv("Chroniques …", 16f, Pal.MUTED)
         game.gravity = Gravity.CENTER
         game.setPadding(0, dp(8), 0, 0)
         hero.setPadding(dp(16), dp(24), dp(16), dp(24))
@@ -190,15 +191,15 @@ class MainActivity : Activity() {
 
         col.addView(section("Ordinateur"))
         col.addView(pair(
-            btn("⏻  Allumer", Pal.GREEN, 72) { act("/wake") },
-            btn("Éteindre", Pal.RED, 72) {
+            btn("Allumer", Pal.GREEN, 72) { act("/wake") },
+            btn2("Éteindre", Pal.RED, 72) {
                 dialogBuilder().setMessage("Éteindre le PC ?")
                     .setPositiveButton("Éteindre") { _, _ -> act("/shutdown") }
                     .setNegativeButton("Annuler", null).show()
             }
         ))
 
-        col.addView(btn("Redémarrer", Pal.AMBER, 56) {
+        col.addView(btn2("Redémarrer", Pal.FG, 56) {
             dialogBuilder().setMessage("Redémarrer le PC ? Il se reconnectera tout seul.")
                 .setPositiveButton("Redémarrer") { _, _ -> act("/restart") }
                 .setNegativeButton("Annuler", null).show()
@@ -206,8 +207,8 @@ class MainActivity : Activity() {
 
         col.addView(section("Chroniques"))
         col.addView(pair(
-            btn("Lancer", Pal.PURPLE, 72) { act("/game/start") },
-            btn("Arrêter", Pal.GRAY, 72) {
+            btn2("Lancer", Pal.FG, 72) { act("/game/start") },
+            btn2("Arrêter", Pal.RED, 72) {
                 dialogBuilder().setMessage("Arrêter le serveur Chroniques ?")
                     .setPositiveButton("Arrêter") { _, _ -> act("/game/stop") }
                     .setNegativeButton("Annuler", null).show()
@@ -215,7 +216,7 @@ class MainActivity : Activity() {
         ))
 
         col.addView(section("Jellyfin"))
-        col.addView(btn("Actualiser la bibliothèque", Pal.BLUE, 56) {
+        col.addView(btn2("Actualiser la bibliothèque", Pal.FG, 56) {
             msg.text = "…"
             thread {
                 val t = Jellyfin.refresh(st)
@@ -240,9 +241,9 @@ class MainActivity : Activity() {
                 } catch (e: Exception) { false }
                 runOnUiThread {
                     status.textSize = 28f
-                    status.text = if (online) "● Allumé" else "● Éteint"
+                    status.text = if (online) "Allumé" else "Éteint"
                     status.setTextColor(if (online) Pal.GREEN else Pal.RED)
-                    game.text = if (running) "● Chroniques allumé" else "● Chroniques éteint"
+                    game.text = if (running) "Chroniques allumé" else "Chroniques éteint"
                     game.setTextColor(if (running) Pal.GREEN else Pal.RED)
                 }
             } catch (e: Exception) {
@@ -250,7 +251,7 @@ class MainActivity : Activity() {
                     status.textSize = 22f
                     status.text = "Serveur injoignable"
                     status.setTextColor(Pal.MUTED)
-                    game.text = "● Chroniques …"
+                    game.text = "Chroniques …"
                     game.setTextColor(Pal.MUTED)
                 }
             }

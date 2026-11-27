@@ -159,15 +159,15 @@ class QbTab(private val a: Activity, private val st: Settings, private val clien
         act.sortByDescending { it.optLong("dlspeed", 0L) }
         done.sortByDescending { it.optLong("completion_on", 0L) }
 
-        summary.addView(a.tv("⬇ " + act.size + " en cours    ✓ " + done.size + " terminés", 17f, Pal.FG))
+        summary.addView(a.tv(act.size.toString() + " en cours  ·  " + done.size + " terminés", 17f, Pal.FG))
         summary.addView(a.tv("↓ " + fmtSpeed(dl) + "    ↑ " + fmtSpeed(up), 14f, Pal.MUTED))
         summary.addView(row(
-            small("⏸ Tout", Pal.GRAY) { doIt("Tout est en pause") { client.pause("all") } },
-            small("▶ Tout", Pal.GREEN) { doIt("Tout reprend") { client.resume("all") } },
-            small("🐢 Limite", Pal.BLUE) { limitDialog() }
+            small("Tout pause", Pal.GRAY) { doIt("Tout est en pause") { client.pause("all") } },
+            small("Tout reprendre", Pal.GREEN) { doIt("Tout reprend") { client.resume("all") } },
+            small("Limite", Pal.BLUE) { limitDialog() }
         ))
 
-        headActive.text = "EN COURS (" + act.size + ")"
+        headActive.text = "En cours (" + act.size + ")"
         if (act.isEmpty()) listActive.addView(a.tv("Aucun téléchargement en cours.", 14f, Pal.MUTED))
         for (o in act) {
             val c = a.card()
@@ -182,9 +182,9 @@ class QbTab(private val a: Activity, private val st: Settings, private val clien
             val name = o.str("name")
             val paused = o.str("state").let { it.startsWith("paused") || it.startsWith("stopped") }
             c.addView(row(
-                if (paused) small("▶ Reprendre", Pal.GREEN) { doIt("Repris") { client.resume(hash) } }
-                else small("⏸ Pause", Pal.GRAY) { doIt("En pause") { client.pause(hash) } },
-                small("🗑 Supprimer", Pal.RED) {
+                if (paused) small("Reprendre", Pal.GREEN) { doIt("Repris") { client.resume(hash) } }
+                else small("Pause", Pal.GRAY) { doIt("En pause") { client.pause(hash) } },
+                small("Supprimer", Pal.RED) {
                     a.dialogBuilder().setTitle("Supprimer ce téléchargement ?").setMessage(name)
                         .setPositiveButton("Avec les fichiers") { _, _ -> doIt("Supprimé") { client.delete(hash, true) } }
                         .setNeutralButton("Garder les fichiers") { _, _ -> doIt("Retiré de qBittorrent") { client.delete(hash, false) } }
@@ -194,7 +194,7 @@ class QbTab(private val a: Activity, private val st: Settings, private val clien
             listActive.addView(c)
         }
 
-        headDone.text = "TERMINÉS (" + done.size + ")"
+        headDone.text = "Terminés (" + done.size + ")"
         if (done.isEmpty()) listDone.addView(a.tv("Rien de terminé pour l'instant.", 14f, Pal.MUTED))
         val fmt = SimpleDateFormat("dd/MM HH:mm", Locale.FRANCE)
         for (o in done.take(30)) {

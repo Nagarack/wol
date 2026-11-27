@@ -48,7 +48,7 @@ class MediaTab(private val a: Activity, private val st: Settings) {
     }
 
     private fun link(label: String, port: Int, color: Int): View =
-        a.btn(label + "  ·  port " + port, color, 52) { open(label, port, "") }
+        a.btn2(label + "  ·  port " + port, Pal.FG, 52) { open(label, port, "") }
 
     private fun open(label: String, port: Int, path: String) {
         info.text = "Recherche du PC…"
@@ -97,7 +97,7 @@ class MediaTab(private val a: Activity, private val st: Settings) {
                             val pos = ps?.optLong("PositionTicks", 0L) ?: 0L
                             val pct = if (ticks > 0) (pos * 100 / ticks).toInt() else 0
                             val sn = np.str("SeriesName")
-                            lines.add((if (ps?.optBoolean("IsPaused", false) == true) "⏸ " else "▶ ") +
+                            lines.add((if (ps?.optBoolean("IsPaused", false) == true) "En pause · " else "Lecture · ") +
                                 o.str("UserName") + " · " + o.str("DeviceName") + "\n" +
                                 (if (sn.isNotEmpty()) sn + " – " else "") + np.str("Name") + "   " + pct + " %")
                         }
