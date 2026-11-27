@@ -27,6 +27,10 @@ class SearchTab(private val a: Activity, private val st: Settings) {
     private val results = LinearLayout(a)
     private var all: List<Rel> = emptyList()
     private var filter = ""
+    private var fQ = st.get("sQ")      // qualité : "", 4K, 1080p, 720p, SD
+    private var fL = st.get("sL")      // langue : "", vf (VF + MULTI), vostfr
+    private var fS = st.get("sS").toIntOrNull() ?: 0   // taille max en Go (0 = sans limite)
+    private var fSort = st.get("sSort").ifEmpty { "seeders" }
 
     init {
         view.orientation = LinearLayout.VERTICAL
@@ -183,14 +187,69 @@ class SearchTab(private val a: Activity, private val st: Settings) {
         val vis = all.filter { !vo || it.isVideo() }
         val hidden = all.size - vis.size
         setStatus(vis.size.toString() + " résultat(s)" + (if (hidden > 0) " · $hidden masqué(s) (jeux, musique, logiciels…)" else ""))
+        val nf = listOf(fQ.isNotEmpty(), fL.isNotEmpty(), fS != 0, fSort != "seeders").count { it }
+        val fc = a.tv(if (nf > 0) "Filtres ($nf)" else "Filtres", 14f, Color.WHITE)
+        fc.setPadding(a.dp(14), a.dp(8), a.dp(14), a.dp(8))
+        fc.background = a.rounded(if (nf > 0) Pal.BLUE else Pal.GRAY, 20)
+        fc.setOnClickListener { filtersDialog() }
+        val flp = LinearLayout.LayoutParams(WRAP, WRAP)
+        flp.rightMargin = a.dp(8)
+        chips.addView(fc, flp)
         addToggleChip("Films / séries / animés seulement", vo)
         val names = vis.map { it.indexer }.distinct().sorted()
         addChip("Tous (" + vis.size + ")", "")
         for (n in names) addChip(n + " (" + vis.count { it.indexer == n } + ")", n)
         val shown = vis.filter { filter.isEmpty() || it.indexer == filter }
-            .sortedByDescending { it.seeders }.take(100)
+            .filter { fQ.isEmpty() || it.quality() == fQ }
+            .filter { fL.isEmpty() || (fL == "vf" && (it.lang() == "VF" || it.lang() == "MULTI")) || (fL == "vostfr" && it.lang() == "VOSTFR") }
+            .filter { fS == 0 || it.size <= fS * 1000000000L }
+            .let { l -> when (fSort) { "size" -> l.sortedBy { it.size }; "date" -> l.sortedByDescending { it.date }; else -> l.sortedByDescending { it.seeders } } }
+            .take(100)
         for (r in shown) results.addView(card(r))
         if (shown.isEmpty()) results.addView(a.tv("Aucun résultat.", 14f, Pal.MUTED))
+    }
+
+    // Fenêtre de filtres : chaque choix s'applique tout de suite à la liste
+    private fun filtersDialog() {
+        val body = LinearLayout(a)
+        body.orientation = LinearLayout.VERTICAL
+        body.setPadding(a.dp(16), a.dp(8), a.dp(16), a.dp(8))
+        fun build() {
+            body.removeAllViews()
+            fun group(title: String, opts: List<Pair<String, String>>, cur: String, set: (String) -> Unit) {
+                body.addView(a.section(title))
+                val hs = HorizontalScrollView(a)
+                hs.isHorizontalScrollBarEnabled = false
+                val row = LinearLayout(a)
+                row.orientation = LinearLayout.HORIZONTAL
+                for ((lbl, v) in opts) {
+                    val sel = cur == v
+                    val t = a.tv(lbl, 14f, if (sel) Color.WHITE else Pal.MUTED)
+                    t.setPadding(a.dp(14), a.dp(8), a.dp(14), a.dp(8))
+                    t.background = a.rounded(if (sel) Pal.BLUE else Pal.CARD, 20, if (sel) Pal.BLUE else Pal.BORDER)
+                    t.setOnClickListener { set(v); render(); build() }
+                    val lp = LinearLayout.LayoutParams(WRAP, WRAP)
+                    lp.rightMargin = a.dp(8)
+                    row.addView(t, lp)
+                }
+                hs.addView(row)
+                body.addView(hs)
+            }
+            group("Qualité", listOf("Toutes" to "", "4K" to "4K", "1080p" to "1080p", "720p" to "720p", "SD" to "SD"), fQ) { fQ = it; st.put("sQ", it) }
+            group("Langue", listOf("Toutes" to "", "VF / Multi" to "vf", "VOSTFR" to "vostfr"), fL) { fL = it; st.put("sL", it) }
+            group("Taille maximale", listOf("Sans limite" to "0", "5 Go" to "5", "15 Go" to "15", "40 Go" to "40"), fS.toString()) { fS = it.toInt(); st.put("sS", it) }
+            group("Trier par", listOf("Seeders" to "seeders", "Plus petit" to "size", "Plus récent" to "date"), fSort) { fSort = it; st.put("sSort", it) }
+        }
+        build()
+        val sv = ScrollView(a)
+        sv.addView(body)
+        a.dialogBuilder().setTitle("Filtres").setView(sv)
+            .setNeutralButton("Réinitialiser") { _, _ ->
+                fQ = ""; fL = ""; fS = 0; fSort = "seeders"
+                st.put("sQ", ""); st.put("sL", ""); st.put("sS", "0"); st.put("sSort", "seeders")
+                render()
+            }
+            .setPositiveButton("Fermer", null).show()
     }
 
     private fun addToggleChip(label: String, on: Boolean) {
@@ -236,7 +295,9 @@ class SearchTab(private val a: Activity, private val st: Settings) {
         tag(String.format(Locale.FRANCE, "%.2f Go", go), Pal.MUTED)
         val sc = if (r.seeders >= 20) Pal.GREEN else if (r.seeders >= 5) Pal.MUTED else Pal.RED
         tag(r.seeders.toString() + " seeders", sc)
-        tag(r.indexer, Pal.BLUE)
+        if (r.quality().isNotEmpty()) tag(r.quality(), Pal.BLUE)
+        if (r.lang().isNotEmpty()) tag(r.lang(), if (r.lang() == "VOSTFR") Pal.MUTED else Pal.GREEN)
+        tag(r.indexer, Pal.MUTED)
         if (r.date.length >= 10) tag(r.date.take(10), Pal.MUTED)
         c.addView(bl)
         val row = LinearLayout(a)

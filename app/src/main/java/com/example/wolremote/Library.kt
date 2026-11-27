@@ -523,7 +523,7 @@ object LibraryUi3 {
                 try {
                     val m = Tonight.pick(st, lo, hi)
                     a.runOnUiThread {
-                        info.text = if (m.isEmpty()) "Aucun film non vu dans cette durée." else ""
+                        info.text = if (m.isEmpty()) "Aucun film non vu dans cette durée." else "Touche un film pour le lancer sur la télévision."
                         for (x in m) {
                             val row = LinearLayout(a); row.orientation = LinearLayout.HORIZONTAL
                             row.setPadding(0, a.dp(8), 0, a.dp(8))
@@ -537,6 +537,7 @@ object LibraryUi3 {
                             t.addView(a.tv(x.title, 15f, Pal.FG))
                             t.addView(a.tv((x.minutes / 60).toString() + " h " + String.format("%02d", x.minutes % 60) + (if (x.rating > 0) "  ·  " + String.format(Locale.FRANCE, "%.1f", x.rating) + "/10" else ""), 13f, Pal.MUTED))
                             row.addView(t, LinearLayout.LayoutParams(0, WRAP, 1f))
+                            row.setOnClickListener { RemoteUi.playOn(a, st, x.id, x.title) }
                             list.addView(row)
                         }
                     }

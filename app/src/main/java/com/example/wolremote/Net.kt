@@ -130,6 +130,28 @@ class Rel(
     val size: Long, val seeders: Int, val date: String, val downloadUrl: String, val magnetUrl: String,
     val cats: List<Pair<Int, String>>
 ) {
+    // Qualité et langue déduites du titre de la release
+    fun quality(): String {
+        val t = title.lowercase()
+        return when {
+            Regex("2160p|\\b4k\\b|\\buhd\\b").containsMatchIn(t) -> "4K"
+            t.contains("1080") -> "1080p"
+            t.contains("720") -> "720p"
+            Regex("480p|576p|dvdrip|\\bsd\\b|dvd").containsMatchIn(t) -> "SD"
+            else -> ""
+        }
+    }
+
+    fun lang(): String {
+        val t = title.lowercase()
+        return when {
+            t.contains("vostfr") || t.contains("subfrench") -> "VOSTFR"
+            t.contains("multi") -> "MULTI"
+            Regex("truefrench|\\bvff\\b|\\bvfq\\b|\\bvfi\\b|\\bvf\\b|\\bfrench\\b").containsMatchIn(t) -> "VF"
+            else -> ""
+        }
+    }
+
     // Vrai pour films, séries, animés (et documentaires). Faux pour jeux, musique, logiciels, livres, adulte…
     fun isVideo(): Boolean {
         if (cats.isEmpty()) return true   // catégorie inconnue : on garde
