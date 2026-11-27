@@ -56,7 +56,7 @@ class SearchTab(private val a: Activity, private val st: Settings) {
         qlp.topMargin = 0
         sr.addView(query, qlp)
         val sb = a.btn("Chercher", Pal.BLUE, 48) { search() }
-        val slp = LinearLayout.LayoutParams(a.dp(56), a.dp(48))
+        val slp = LinearLayout.LayoutParams(WRAP, a.dp(48))
         slp.leftMargin = a.dp(8)
         sb.layoutParams = slp
         sr.addView(sb)
