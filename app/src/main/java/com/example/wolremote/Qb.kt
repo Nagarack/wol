@@ -21,7 +21,7 @@ class QbClient(private val st: Settings) {
         c.readTimeout = 8000
         c.setRequestProperty("Referer", base)
         c.setRequestProperty("Origin", base)
-        if (sid.isNotEmpty()) c.setRequestProperty("Cookie", "SID=$sid")
+        if (sid.isNotEmpty()) c.setRequestProperty("Cookie", sid)
         try {
             if (form != null) {
                 c.doOutput = true
@@ -33,8 +33,9 @@ class QbClient(private val st: Settings) {
                 val k = e.key
                 if (k != null && k.equals("set-cookie", ignoreCase = true)) {
                     for (v in e.value) {
-                        val i = v.indexOf("SID=")
-                        if (i >= 0) sid = v.substring(i + 4).substringBefore(";")
+                        // qBittorrent 4 : "SID=…", qBittorrent 5 : "QBT_SID_<port>=…"
+                        val pair = v.substringBefore(";").trim()
+                        if (pair.substringBefore("=").contains("SID")) sid = pair
                     }
                 }
             }

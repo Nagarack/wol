@@ -62,7 +62,7 @@ class MainActivity : Activity() {
         nav.orientation = LinearLayout.HORIZONTAL
         nav.setBackgroundColor(Pal.CARD)
         nav.setPadding(dp(6), dp(6), dp(6), dp(6))
-        val icons = listOf("⏻", "🔎", "⬇", "📦", "🔗", "⚙")
+        val icons = listOf("💻", "🔎", "⬇", "📦", "🔗", "⚙")
         val names = listOf("PC", "Chercher", "En cours", "qBit", "Liens", "Réglages")
         val list = ArrayList<TextView>()
         for (i in icons.indices) {
