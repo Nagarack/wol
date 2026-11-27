@@ -10,6 +10,8 @@ import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.Toast
+import org.json.JSONObject
+import kotlin.concurrent.thread
 
 class SettingsTab(private val a: Activity, private val st: Settings) {
     val view = ScrollView(a)
@@ -83,6 +85,42 @@ class SettingsTab(private val a: Activity, private val st: Settings) {
             label()
         }
         col.addView(watch)
+
+        col.addView(a.section("Maison"))
+        col.addView(a.tv("Allume le PC quand ton téléphone rejoint le Wi-Fi de la maison, et te propose de l'éteindre quand tu en pars. Demande la surveillance en arrière-plan (Notifications).", 13f, Pal.MUTED))
+        col.addView(a.btn2("Définir le Wi-Fi actuel comme maison") {
+            val g = wifiGateway(a)
+            if (g.isEmpty()) Toast.makeText(a, "Connecte-toi d'abord au Wi-Fi de la maison", Toast.LENGTH_LONG).show()
+            else { st.put("kHomeGw", g); Toast.makeText(a, "Wi-Fi maison enregistré", Toast.LENGTH_SHORT).show() }
+        })
+        val geo = a.btn("", Pal.BLUE) {}
+        fun geoLabel() { geo.text = if (st.get("kGeo") == "1") "Arrivée / départ : activé" else "Arrivée / départ : désactivé" }
+        geoLabel()
+        geo.setOnClickListener {
+            if (st.get("kGeo") == "1") st.put("kGeo", "0")
+            else if (st.get("kHomeGw").isEmpty()) { Toast.makeText(a, "Définis d'abord le Wi-Fi maison", Toast.LENGTH_LONG).show(); return@setOnClickListener }
+            else { st.put("kGeo", "1"); st.put("kWatch", "1"); label() }
+            WatchService.stop(a)
+            if (st.get("kWatch") == "1" && st.get("kVac") != "1") WatchService.start(a)
+            geoLabel()
+        }
+        col.addView(geo)
+
+        col.addView(a.section("Mode vacances"))
+        col.addView(a.tv("Coupe la surveillance en arrière-plan et les alertes de la tablette (températures, disque, PC allumé la nuit).", 13f, Pal.MUTED))
+        val vacB = a.btn2("") {}
+        fun vacLabel() { vacB.text = if (st.get("kVac") == "1") "Mode vacances : activé" else "Mode vacances : désactivé" }
+        vacLabel()
+        vacB.setOnClickListener {
+            val on = st.get("kVac") != "1"
+            st.put("kVac", if (on) "1" else "0")
+            if (on) WatchService.stop(a) else if (st.get("kWatch") == "1") WatchService.start(a)
+            thread {
+                try { Net.call("POST", st.tablet() + "/vacation", json = JSONObject().put("pin", st.pin()).put("on", on).toString(), timeout = 10000) } catch (e: Exception) { }
+            }
+            vacLabel()
+        }
+        col.addView(vacB)
 
         col.addView(a.section("Sauvegarde"))
         col.addView(a.tv("Exporte tes réglages (clés API, PIN…) dans un fichier protégé par un mot de passe, pour les retrouver après une réinstallation.", 13f, Pal.MUTED))

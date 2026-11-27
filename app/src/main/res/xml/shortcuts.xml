@@ -1,0 +1,24 @@
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="wake"
+        android:enabled="true"
+        android:icon="@drawable/ic_sc_wake"
+        android:shortcutShortLabel="@string/sc_wake"
+        android:shortcutLongLabel="@string/sc_wake_long">
+        <intent
+            android:action="com.example.wolremote.WAKE"
+            android:targetPackage="com.example.wolremote"
+            android:targetClass="com.example.wolremote.MainActivity" />
+    </shortcut>
+    <shortcut
+        android:shortcutId="shutdown"
+        android:enabled="true"
+        android:icon="@drawable/ic_sc_off"
+        android:shortcutShortLabel="@string/sc_off"
+        android:shortcutLongLabel="@string/sc_off_long">
+        <intent
+            android:action="com.example.wolremote.SHUTDOWN"
+            android:targetPackage="com.example.wolremote"
+            android:targetClass="com.example.wolremote.MainActivity" />
+    </shortcut>
+</shortcuts>

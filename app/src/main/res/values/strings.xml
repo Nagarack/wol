@@ -1,0 +1,6 @@
+<resources>
+    <string name="sc_wake">Allumer le PC</string>
+    <string name="sc_wake_long">Allumer le PC</string>
+    <string name="sc_off">Éteindre le PC</string>
+    <string name="sc_off_long">Éteindre le PC</string>
+</resources>

@@ -9,7 +9,12 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
 import android.os.IBinder
+import org.json.JSONObject
 import kotlin.concurrent.thread
 
 // Surveille qBittorrent en arrière-plan : notification à chaque téléchargement terminé,
@@ -17,6 +22,9 @@ import kotlin.concurrent.thread
 class WatchService : Service() {
     @Volatile private var running = false
     private var counter = 0
+    private var cb: ConnectivityManager.NetworkCallback? = null
+    @Volatile private var atHome = false
+    private var lastArrive = 0L
 
     override fun onBind(i: Intent?): IBinder? = null
 
@@ -37,6 +45,7 @@ class WatchService : Service() {
             .setContentTitle("Mon PC").setContentText("Surveillance des téléchargements active")
             .setContentIntent(openApp()).setOngoing(true).build()
         if (Build.VERSION.SDK_INT >= 29) startForeground(1, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC) else startForeground(1, n)
+        if (cb == null && Settings(this).get("kGeo") == "1") registerHome()
         if (!running) {
             running = true
             thread { loop() }
@@ -97,7 +106,61 @@ class WatchService : Service() {
         }
     }
 
+    private fun pcOnline(st: Settings): Boolean = try {
+        JSONObject(Net.call("GET", st.tablet() + "/status", timeout = 6000).body).getBoolean("online")
+    } catch (e: Exception) { false }
+
+    private fun say(title: String, text: String, action: String? = null) {
+        counter++
+        val pi = if (action == null) openApp() else PendingIntent.getActivity(this, counter,
+            Intent(this, MainActivity::class.java).setAction(action), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        val n = builder("done").setSmallIcon(android.R.drawable.stat_notify_sync).setContentTitle(title).setContentText(text)
+            .setContentIntent(pi).setAutoCancel(true).build()
+        getSystemService(NotificationManager::class.java).notify(2000 + counter, n)
+    }
+
+    // Arrivée / départ de la maison, d'après le Wi-Fi (pas besoin de localisation)
+    private fun registerHome() {
+        val cm = getSystemService(ConnectivityManager::class.java)
+        val c = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(n: Network) {
+                thread {
+                    Thread.sleep(3000)
+                    val st = Settings(this@WatchService)
+                    val home = st.get("kHomeGw")
+                    if (home.isEmpty() || wifiGateway(this@WatchService) != home) return@thread
+                    atHome = true
+                    val now = System.currentTimeMillis()
+                    if (now - lastArrive < 3600000L) return@thread
+                    lastArrive = now
+                    if (!pcOnline(st)) {
+                        try {
+                            Net.call("POST", st.tablet() + "/wake", json = JSONObject().put("pin", st.pin()).toString(), timeout = 15000)
+                            say("Bienvenue", "Le PC est en train de s'allumer.")
+                        } catch (e: Exception) { }
+                    }
+                }
+            }
+            override fun onLost(n: Network) {
+                thread {
+                    if (!atHome) return@thread
+                    atHome = false
+                    Thread.sleep(120000)
+                    if (atHome) return@thread
+                    val st = Settings(this@WatchService)
+                    if (pcOnline(st)) say("Tu es parti", "Le PC est toujours allumé. Touche pour l'éteindre.", "com.example.wolremote.SHUTDOWN")
+                }
+            }
+        }
+        cb = c
+        try {
+            cm.registerNetworkCallback(NetworkRequest.Builder().addTransportType(NetworkCapabilities.TRANSPORT_WIFI).build(), c)
+        } catch (e: Exception) { cb = null }
+    }
+
     override fun onDestroy() {
+        try { cb?.let { getSystemService(ConnectivityManager::class.java).unregisterNetworkCallback(it) } } catch (e: Exception) { }
+        cb = null
         running = false
         super.onDestroy()
     }

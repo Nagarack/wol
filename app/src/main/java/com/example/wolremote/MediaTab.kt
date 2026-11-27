@@ -46,6 +46,8 @@ class MediaTab(private val a: Activity, private val st: Settings) {
         col.addView(a.btn2("Que regarder ce soir") { LibraryUi3.tonight(a, st) })
         col.addView(a.btn2("Nettoyage des films déjà vus") { LibraryUi3.cleanup(a, st) })
         col.addView(a.btn2("Qualité et doublons") { LibraryUi2.quality(a, st) })
+        col.addView(a.section("Maintenance"))
+        col.addView(a.btn2("Mettre à jour les conteneurs") { LibraryUi4.docker(a, st) })
         col.addView(a.section("Raccourcis"))
         col.addView(link("Jellyfin", 8096, Pal.PURPLE))
         col.addView(link("Prowlarr", 9696, Pal.GRAY))

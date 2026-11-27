@@ -145,6 +145,13 @@ class PowerCard(private val a: Activity, private val st: Settings) {
                     if (!d.isNull("cpu_t") && d.has("cpu_t")) parts.add("CPU " + d.optInt("cpu_t") + " °C")
                     if (!d.isNull("gpu_t") && d.has("gpu_t")) parts.add("GPU " + d.optInt("gpu_t") + " °C")
                     if (!d.isNull("disk_used") && d.has("disk_used")) parts.add("disque " + d.optInt("disk_used") + " % plein")
+                    val dr = d.optJSONArray("drives")
+                    if (dr != null) for (i in 0 until dr.length()) {
+                        val o = dr.optJSONObject(i) ?: continue
+                        val t = if (o.isNull("temp")) "" else " " + o.optInt("temp") + " °C"
+                        val l = if (o.isNull("life")) "" else " · santé " + o.optInt("life") + " %"
+                        parts.add(o.str("name").take(16) + t + l)
+                    }
                     temps.text = parts.joinToString("  ·  ")
                 } else if (!d.optBoolean("online")) {
                     big.text = "0 W"

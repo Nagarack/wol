@@ -3,6 +3,7 @@ package com.example.wolremote
 import android.app.Activity
 import android.graphics.Color
 import android.graphics.Typeface
+import android.content.Intent
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -22,6 +23,7 @@ class MainActivity : Activity() {
     private lateinit var status: TextView
     private lateinit var game: TextView
     private lateinit var msg: TextView
+    private lateinit var vac: TextView
     private lateinit var queue: QueueTab
     private lateinit var qb: QbTab
     private lateinit var media: MediaTab
@@ -106,6 +108,24 @@ class MainActivity : Activity() {
         root.addView(nav, LinearLayout.LayoutParams(MATCH, WRAP))
         setContentView(root)
         show(0)
+        if (savedInstanceState == null) handleIntent(intent)
+    }
+
+    override fun onNewIntent(i: Intent?) {
+        super.onNewIntent(i)
+        setIntent(i)
+        handleIntent(i)
+    }
+
+    // Raccourcis de l'icône et notifications : « Allumer » direct, « Éteindre » après confirmation
+    private fun handleIntent(i: Intent?) {
+        when (i?.action) {
+            "com.example.wolremote.WAKE" -> act("/wake")
+            "com.example.wolremote.SHUTDOWN" -> dialogBuilder().setMessage("Éteindre le PC ?")
+                .setPositiveButton("Éteindre") { _, _ -> act("/shutdown") }
+                .setNegativeButton("Annuler", null).show()
+        }
+        i?.action = Intent.ACTION_MAIN
     }
 
     @Suppress("DEPRECATION")
@@ -120,7 +140,7 @@ class MainActivity : Activity() {
         super.onResume()
         handler.post(poll)
         updater.check()
-        if (st.get("kWatch") == "1") WatchService.start(this)
+        if (st.get("kWatch") == "1" && st.get("kVac") != "1") WatchService.start(this)
     }
     override fun onPause() { super.onPause(); handler.removeCallbacks(poll) }
 
@@ -176,6 +196,9 @@ class MainActivity : Activity() {
         sv.addView(col)
 
         col.addView(title("Mon PC"))
+        vac = tv("Mode vacances : alertes et surveillance désactivées.", 13f, Pal.MUTED)
+        vac.visibility = View.GONE
+        col.addView(vac)
 
         val hero = card()
         status = tv("Vérification…", 28f, Pal.MUTED)
@@ -241,6 +264,7 @@ class MainActivity : Activity() {
                     JSONObject(Net.call("GET", st.tablet() + "/game/status", timeout = 8000).body).getBoolean("running")
                 } catch (e: Exception) { false }
                 runOnUiThread {
+                    vac.visibility = if (st.get("kVac") == "1") View.VISIBLE else View.GONE
                     status.textSize = 28f
                     status.text = if (online) "Allumé" else "Éteint"
                     status.setTextColor(if (online) Pal.GREEN else Pal.RED)

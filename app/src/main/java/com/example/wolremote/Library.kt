@@ -558,3 +558,72 @@ object LibraryUi3 {
         load(0, 999)
     }
 }
+
+@Suppress("DEPRECATION")
+fun wifiGateway(c: android.content.Context): String {
+    return try {
+        val w = c.applicationContext.getSystemService(android.content.Context.WIFI_SERVICE) as android.net.wifi.WifiManager
+        val g = w.dhcpInfo?.gateway ?: 0
+        if (g == 0) "" else "${g and 255}.${(g shr 8) and 255}.${(g shr 16) and 255}.${(g shr 24) and 255}"
+    } catch (e: Exception) { "" }
+}
+
+// Maintenance : mise à jour des conteneurs Docker (via l'agent du PC)
+object LibraryUi4 {
+    fun docker(a: Activity, st: Settings) {
+        a.dialogBuilder().setTitle("Mettre à jour les conteneurs")
+            .setMessage("Radarr, Sonarr et Prowlarr font d'abord une sauvegarde de leurs réglages, puis tous les conteneurs sont mis à jour et redémarrés. Les téléchargements et lectures en cours seront interrompus quelques minutes.")
+            .setPositiveButton("Lancer") { _, _ -> run(a, st) }
+            .setNegativeButton("Annuler", null).show()
+    }
+
+    private fun run(a: Activity, st: Settings) {
+        val body = LinearLayout(a); body.orientation = LinearLayout.VERTICAL
+        body.setPadding(a.dp(16), a.dp(8), a.dp(16), a.dp(8))
+        val info = a.tv("Sauvegarde des réglages…", 14f, Pal.FG)
+        body.addView(info)
+        var open = true
+        a.dialogBuilder().setTitle("Mise à jour").setView(body).setPositiveButton("Fermer") { _, _ -> open = false }
+            .setOnDismissListener { open = false }.show()
+        thread {
+            for ((port, v, k) in listOf(Triple(7878, "v3", "kRadarr"), Triple(8989, "v3", "kSonarr"), Triple(9696, "v1", "kProwlarr"))) {
+                val key = st.get(k)
+                if (key.isNotEmpty()) try {
+                    Net.call("POST", st.base(port) + "/api/$v/command", key, json = "{\"name\":\"Backup\"}", timeout = 10000)
+                } catch (e: Exception) { }
+            }
+            try {
+                Thread.sleep(3000)
+                val r = Net.call("POST", st.tablet() + "/docker/update", json = JSONObject().put("pin", st.pin()).toString(), timeout = 25000)
+                val res = JSONObject(r.body)
+                if (res.optString("result") != "started" && res.optString("result") != "busy") {
+                    a.runOnUiThread { info.text = res.optString("message", "Échec") }
+                    return@thread
+                }
+            } catch (e: Exception) {
+                a.runOnUiThread { info.text = "Échec : " + e.message }
+                return@thread
+            }
+            Thread.sleep(4000)
+            while (open) {
+                try {
+                    val d = JSONObject(Net.call("GET", st.tablet() + "/docker/status", timeout = 6000).body)
+                    val s = d.optString("state")
+                    if (s == "done") {
+                        val u = d.optJSONArray("updated")
+                        val names = ArrayList<String>()
+                        if (u != null) for (i in 0 until u.length()) names.add(u.optString(i))
+                        a.runOnUiThread { info.text = if (names.isEmpty()) "Terminé : tout était déjà à jour." else "Terminé. Mis à jour : " + names.joinToString(", ") }
+                        return@thread
+                    }
+                    if (s == "error") { a.runOnUiThread { info.text = "Erreur : " + d.optString("msg") }; return@thread }
+                    val m = if (s == "running") d.optString("msg") else "En attente de l'agent du PC…"
+                    a.runOnUiThread { info.text = m }
+                } catch (e: Exception) {
+                    // le PC peut être injoignable quelques secondes pendant le redémarrage des conteneurs
+                }
+                Thread.sleep(4000)
+            }
+        }
+    }
+}
