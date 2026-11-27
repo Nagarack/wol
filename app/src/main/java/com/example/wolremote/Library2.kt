@@ -65,7 +65,7 @@ object Sagas {
         val known = JSONObject(lk.body).optInt("id", 0)
         if (known > 0) {   // déjà suivi dans Radarr : on lance simplement la recherche
             val c = Net.call("POST", "$base/api/v3/command", key, JSONObject().put("name", "MoviesSearch").put("movieIds", JSONArray().put(known)).toString(), 30000)
-            return if (c.ok) null else "refusé (" + c.code + ")"
+            return if (c.ok) null else "refusé (" + c.code + ") " + errMsg(c.body)
         }
         val pref = st.get("pRadarr").trim().toIntOrNull()
         val prof = pref ?: JSONArray(Net.call("GET", "$base/api/v3/qualityprofile", key).body).optJSONObject(0)?.optInt("id") ?: return "aucun profil de qualité"
@@ -77,7 +77,7 @@ object Sagas {
         body.put("minimumAvailability", "released")
         body.put("addOptions", JSONObject().put("searchForMovie", true))
         val r = Net.call("POST", "$base/api/v3/movie", key, body.toString(), 30000)
-        return if (r.ok) null else "refusé (" + r.code + ")"
+        return if (r.ok) null else "refusé (" + r.code + ") " + errMsg(r.body)
     }
 }
 
@@ -246,11 +246,17 @@ object Shows {
             if (lp.ok) { val la = JSONArray(lp.body); if (la.length() > 0) body.put("languageProfileId", la.getJSONObject(0).getInt("id")) }
         } catch (e: Exception) { }
         val r = Net.call("POST", "$base/api/v3/series", key, body.toString(), 30000)
-        return if (r.ok) null else "refusé (" + r.code + ")"
+        return if (r.ok) null else "refusé (" + r.code + ") " + errMsg(r.body)
     }
 }
 
 // Suggestions via TMDb (clé gratuite, facultative) : populaires, au cinéma, à l'antenne…
+fun errMsg(b: String): String = try {
+    val t = b.trim()
+    if (t.startsWith("[")) JSONArray(t).optJSONObject(0)?.str("errorMessage") ?: t.take(100)
+    else JSONObject(t).let { it.str("message").ifEmpty { it.str("errorMessage") } }.ifEmpty { t.take(100) }
+} catch (e: Exception) { b.take(100) }
+
 object Tmdb {
     val MOVIE = listOf("Populaires" to "popular", "Au cinéma" to "now_playing", "À venir" to "upcoming", "Mieux notés" to "top_rated")
     val TV = listOf("Populaires" to "popular", "À l'antenne" to "on_the_air", "Aujourd'hui" to "airing_today", "Mieux notées" to "top_rated")
