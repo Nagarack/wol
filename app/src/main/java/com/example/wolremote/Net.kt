@@ -72,6 +72,16 @@ class Settings(ctx: Context) {
 
     fun get(k: String): String = p.getString(k, null) ?: DEFAULTS[k] ?: ""
     fun put(k: String, v: String) { p.edit().putString(k, v).apply() }
+    fun all(): Map<String, String> {
+        val m = LinkedHashMap<String, String>()
+        for ((k, v) in p.all) if (v is String) m[k] = v
+        return m
+    }
+    fun replaceAll(m: Map<String, String>) {
+        val e = p.edit()
+        for ((k, v) in m) e.putString(k, v)
+        e.apply()
+    }
 
     fun qbPort(): Int = get("pQb").trim().toIntOrNull() ?: 8080
 

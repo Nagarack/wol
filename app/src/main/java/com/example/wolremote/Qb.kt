@@ -11,7 +11,7 @@ class QbClient(private val st: Settings) {
     private var failAt = 0L
     private var failMsg = ""
 
-    var onComplete: (() -> Unit)? = null
+    var onComplete: ((List<String>) -> Unit)? = null
     private var seen: HashMap<String, Boolean>? = null
 
     class Result(val err: String, val data: JSONArray)
@@ -109,17 +109,17 @@ class QbClient(private val st: Settings) {
             if (!r.ok) return Result("Erreur qBittorrent (HTTP " + r.code + ") : " + r.body.take(100), empty)
             val arr = JSONArray(r.body)
             val now = HashMap<String, Boolean>()
-            var finished = false
+            val finished = ArrayList<String>()
             val prev = seen
             for (i in 0 until arr.length()) {
                 val o = arr.optJSONObject(i) ?: continue
                 val h = o.optString("hash")
                 val done = o.optDouble("progress", 0.0) >= 1.0
                 now[h] = done
-                if (prev != null && done && prev[h] == false) finished = true
+                if (prev != null && done && prev[h] == false) finished.add(o.optString("name"))
             }
             seen = now
-            if (finished) onComplete?.invoke()
+            if (finished.isNotEmpty()) onComplete?.invoke(finished)
             return Result("", arr)
         } catch (e: Exception) {
             return Result("Erreur qBittorrent : " + e.message, empty)

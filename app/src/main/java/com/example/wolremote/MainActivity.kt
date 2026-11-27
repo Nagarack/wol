@@ -27,6 +27,7 @@ class MainActivity : Activity() {
     private lateinit var queue: QueueTab
     private lateinit var qb: QbTab
     private lateinit var media: MediaTab
+    private lateinit var settingsTab: SettingsTab
     private lateinit var views: List<View>
     private lateinit var navs: List<TextView>
     private var current = -1
@@ -52,8 +53,9 @@ class MainActivity : Activity() {
         val search = SearchTab(this, st)
         val qbc = QbClient(st)
         // Un téléchargement vient de se terminer : on laisse à Radarr/Sonarr le temps d'importer, puis on force Jellyfin
-        qbc.onComplete = {
-            thread {
+        // (si la surveillance en arrière-plan est active, c'est elle qui s'en charge)
+        qbc.onComplete = { _ ->
+            if (st.get("kWatch") != "1") thread {
                 Thread.sleep(90000)
                 Jellyfin.refresh(st)
                 Thread.sleep(120000)
@@ -63,7 +65,8 @@ class MainActivity : Activity() {
         queue = QueueTab(this, st, qbc)
         qb = QbTab(this, st, qbc)
         media = MediaTab(this, st)
-        val settings = SettingsTab(this, st)
+        settingsTab = SettingsTab(this, st)
+        val settings = settingsTab
         views = listOf(buildPcTab(), search.view, queue.view, qb.view, media.view, settings.view)
 
         val frame = FrameLayout(this)
@@ -105,9 +108,20 @@ class MainActivity : Activity() {
         show(0)
     }
 
+    @Suppress("DEPRECATION")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: android.content.Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        settingsTab.onResult(requestCode, resultCode, data)
+    }
+
     private val power by lazy { PowerCard(this, st) }
     private val updater by lazy { Updater(this) }
-    override fun onResume() { super.onResume(); handler.post(poll); updater.check() }
+    override fun onResume() {
+        super.onResume()
+        handler.post(poll)
+        updater.check()
+        if (st.get("kWatch") == "1") WatchService.start(this)
+    }
     override fun onPause() { super.onPause(); handler.removeCallbacks(poll) }
 
     private fun show(i: Int) {
