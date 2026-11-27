@@ -2,10 +2,16 @@ package com.example.wolremote
 
 // Actualisation forcée de la bibliothèque Jellyfin (port 8096).
 object Jellyfin {
-    fun get(st: Settings, path: String): Resp {
+    fun get(st: Settings, path: String, timeout: Int = 8000): Resp {
         val key = st.get("kJellyfin").trim()
         val hd = mapOf("Authorization" to "MediaBrowser Token=\"$key\"", "X-Emby-Token" to key)
-        return Net.call("GET", st.base(8096) + path, timeout = 8000, headers = hd)
+        return Net.call("GET", st.base(8096) + path, timeout = timeout, headers = hd)
+    }
+
+    fun post(st: Settings, path: String): Resp {
+        val key = st.get("kJellyfin").trim()
+        val hd = mapOf("Authorization" to "MediaBrowser Token=\"$key\"", "X-Emby-Token" to key)
+        return Net.call("POST", st.base(8096) + path, json = "", timeout = 30000, headers = hd)
     }
 
     fun refresh(st: Settings): String {

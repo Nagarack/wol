@@ -64,7 +64,20 @@ class WatchService : Service() {
                 Jellyfin.refresh(st)
             }
         }
+        var lastDisk = 0L
         while (running) {
+            val now = System.currentTimeMillis()
+            if (now - lastDisk > 1800000L) {
+                lastDisk = now
+                val msg = try { Storage.lowAlert(st) } catch (e: Exception) { null }
+                if (msg != null && now - st.get("kDiskNotif").toLongOrNull().let { it ?: 0L } > 86400000L) {
+                    st.put("kDiskNotif", now.toString())
+                    val n = builder("done").setSmallIcon(android.R.drawable.stat_notify_error)
+                        .setContentTitle("Espace disque faible").setContentText(msg)
+                        .setContentIntent(openApp()).setAutoCancel(true).build()
+                    getSystemService(NotificationManager::class.java).notify(900, n)
+                }
+            }
             val r = client.torrents()
             try {
                 Thread.sleep(if (r.err.isEmpty()) 15000L else 60000L)
