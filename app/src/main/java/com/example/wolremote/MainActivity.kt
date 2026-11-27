@@ -36,7 +36,7 @@ class MainActivity : Activity() {
             if (current == 0) refreshPc()
             if (current == 2) queue.refresh()
             if (current == 3) qb.refresh()
-            handler.postDelayed(this, 4000)
+            handler.postDelayed(this, 2000)
         }
     }
 
@@ -48,8 +48,9 @@ class MainActivity : Activity() {
         window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
 
         val search = SearchTab(this, st)
-        queue = QueueTab(this, st)
-        qb = QbTab(this, st)
+        val qbc = QbClient(st)
+        queue = QueueTab(this, st, qbc)
+        qb = QbTab(this, st, qbc)
         val links = LinksTab(this, st)
         val settings = SettingsTab(this, st)
         views = listOf(buildPcTab(), search.view, queue.view, qb.view, links.view, settings.view)

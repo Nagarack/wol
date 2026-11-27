@@ -10,14 +10,14 @@ import org.json.JSONArray
 import org.json.JSONObject
 import kotlin.concurrent.thread
 
-class QueueTab(private val a: Activity, private val st: Settings) {
+class QueueTab(private val a: Activity, private val st: Settings, private val qb: QbClient) {
     val view = ScrollView(a)
     private val col = LinearLayout(a)
     private val info = a.tv("", 14f, Pal.MUTED)
     private val list = LinearLayout(a)
     private var busy = false
 
-    private class Item(val who: String, val title: String, val pct: Int, val extra: String)
+    private class Item(val who: String, val title: String, var pct: Int, var extra: String, val hash: String)
 
     init {
         view.isFillViewport = true
@@ -53,7 +53,7 @@ class QueueTab(private val a: Activity, private val st: Settings) {
                 val pct = if (size > 0) ((size - left) / size * 100).toInt() else 0
                 val tl = o.str("timeleft")
                 val status = o.str("status")
-                items.add(Item(who, o.str("title"), pct, status + (if (tl.isNotEmpty()) " · reste $tl" else "")))
+                items.add(Item(who, o.str("title"), pct, status + (if (tl.isNotEmpty()) " · reste $tl" else ""), o.str("downloadId").uppercase()))
             }
         } catch (e: Exception) {
             errs.add("$who : injoignable")
@@ -72,6 +72,20 @@ class QueueTab(private val a: Activity, private val st: Settings) {
                 } else {
                     fetch("Radarr", 7878, "kRadarr", items, errs)
                     fetch("Sonarr", 8989, "kSonarr", items, errs)
+                    // Progression en direct depuis qBittorrent (Radarr/Sonarr ne se rafraîchissent que toutes les ~minutes)
+                    if (items.isNotEmpty() && st.get("kQbUser").isNotEmpty()) {
+                        val t = qb.torrents()
+                        for (i in 0 until t.data.length()) {
+                            val o = t.data.optJSONObject(i) ?: continue
+                            val h = o.str("hash").uppercase()
+                            val item = items.firstOrNull { x -> x.hash.isNotEmpty() && x.hash == h } ?: continue
+                            item.pct = (o.optDouble("progress", 0.0) * 100).toInt()
+                            val sp = o.optLong("dlspeed", 0L)
+                            val eta = o.optLong("eta", 8640000L)
+                            item.extra = (if (sp >= 1000000L) String.format(java.util.Locale.FRANCE, "%.1f Mo/s", sp / 1e6) else String.format(java.util.Locale.FRANCE, "%.0f Ko/s", sp / 1e3)) +
+                                (if (eta < 8640000L) " · reste " + (if (eta >= 3600L) (eta / 3600).toString() + " h " + ((eta % 3600) / 60) + " min" else if (eta >= 60L) (eta / 60).toString() + " min" else "$eta s") else "")
+                        }
+                    }
                 }
             } catch (e: Exception) {
                 errs.add("Erreur : " + e.message)

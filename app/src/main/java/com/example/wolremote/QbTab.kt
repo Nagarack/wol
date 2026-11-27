@@ -16,7 +16,7 @@ import java.util.Locale
 import kotlin.concurrent.thread
 
 // Résumé des téléchargements qBittorrent (API Web v2)
-class QbTab(private val a: Activity, private val st: Settings) {
+class QbTab(private val a: Activity, private val st: Settings, private val client: QbClient) {
     val view = ScrollView(a)
     private val col = LinearLayout(a)
     private val info = a.tv("", 14f, Pal.MUTED)
@@ -26,7 +26,6 @@ class QbTab(private val a: Activity, private val st: Settings) {
     private val headDone = a.section("")
     private val listDone = LinearLayout(a)
     private var busy = false
-    private var sid = ""
 
     init {
         view.isFillViewport = true
@@ -57,71 +56,14 @@ class QbTab(private val a: Activity, private val st: Settings) {
         })
     }
 
-    private fun req(method: String, path: String, form: String? = null): Resp {
-        val base = st.base(8080)
-        val c = URL(base + path).openConnection() as HttpURLConnection
-        c.requestMethod = method
-        c.connectTimeout = 5000
-        c.readTimeout = 10000
-        c.setRequestProperty("Referer", base)
-        if (sid.isNotEmpty()) c.setRequestProperty("Cookie", "SID=$sid")
-        try {
-            if (form != null) {
-                c.doOutput = true
-                c.setRequestProperty("Content-Type", "application/x-www-form-urlencoded")
-                c.outputStream.use { it.write(form.toByteArray(Charsets.UTF_8)) }
-            }
-            val code = c.responseCode
-            for (e in c.headerFields.entries) {
-                val k = e.key
-                if (k != null && k.equals("set-cookie", ignoreCase = true)) {
-                    for (v in e.value) {
-                        if (v.startsWith("SID=")) sid = v.substringAfter("SID=").substringBefore(";")
-                    }
-                }
-            }
-            val stream = if (code < 400) c.inputStream else c.errorStream
-            val body = stream?.bufferedReader(Charsets.UTF_8)?.readText() ?: ""
-            return Resp(code, body)
-        } finally {
-            c.disconnect()
-        }
-    }
-
     fun refresh() {
         if (busy) return
         busy = true
         thread {
-            var err = ""
-            var arr = JSONArray()
-            try {
-                if (!st.reach(8080)) {
-                    err = "qBittorrent injoignable (PC éteint ou hors réseau)."
-                } else {
-                    var r = req("GET", "/api/v2/torrents/info")
-                    if (r.code == 403 || r.code == 401) {
-                        val u = st.get("kQbUser")
-                        val p = st.get("kQbPass")
-                        if (u.isEmpty()) {
-                            err = "qBittorrent demande un identifiant : renseigne-le dans Réglages."
-                        } else {
-                            val l = req("POST", "/api/v2/auth/login", "username=" + Net.enc(u) + "&password=" + Net.enc(p))
-                            if (!l.body.trim().startsWith("Ok")) err = "Identifiants qBittorrent refusés (Réglages)."
-                            else r = req("GET", "/api/v2/torrents/info")
-                        }
-                    }
-                    if (err.isEmpty()) {
-                        if (r.ok) arr = JSONArray(r.body) else err = "Erreur qBittorrent (" + r.code + ")"
-                    }
-                }
-            } catch (e: Exception) {
-                err = "Erreur : " + e.message
-            }
-            val data = arr
-            val msg = err
+            val r = client.torrents()
             a.runOnUiThread {
                 busy = false
-                render(data, msg)
+                render(r.data, r.err)
             }
         }
     }
