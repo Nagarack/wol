@@ -44,10 +44,10 @@ class QbTab(private val a: Activity, private val st: Settings, private val clien
         col.addView(listDone)
         col.addView(a.btn("Ouvrir l'interface qBittorrent", Pal.GRAY) {
             thread {
-                val ok = st.reach(8080)
+                val ok = st.reach(st.qbPort())
                 a.runOnUiThread {
                     if (ok) {
-                        try { a.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(st.base(8080)))) } catch (e: Exception) { info.text = "Impossible d'ouvrir le navigateur." }
+                        try { a.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(st.base(st.qbPort())))) } catch (e: Exception) { info.text = "Impossible d'ouvrir le navigateur." }
                     } else {
                         info.text = "qBittorrent injoignable."
                     }

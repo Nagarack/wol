@@ -45,8 +45,11 @@ class SettingsTab(private val a: Activity, private val st: Settings) {
         add("Profil de qualité Radarr (ID, vide = le premier)", "pRadarr", num)
         add("Profil de qualité Sonarr (ID, vide = le premier)", "pSonarr", num)
         col.addView(a.section("qBittorrent"))
+        add("qBittorrent : port (8080 par défaut)", "pQb", num)
         add("qBittorrent : utilisateur", "kQbUser", InputType.TYPE_CLASS_TEXT)
         add("qBittorrent : mot de passe", "kQbPass", pw)
+        col.addView(a.section("Jellyfin"))
+        add("Clé API Jellyfin (Tableau de bord, Clés API)", "kJellyfin", pw)
         col.addView(a.section("Consommation"))
         add("Prix du kWh en € (par défaut : tarif réglementé EDF Base)", "kTarifKwh", InputType.TYPE_CLASS_TEXT)
 

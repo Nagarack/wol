@@ -49,6 +49,15 @@ class MainActivity : Activity() {
 
         val search = SearchTab(this, st)
         val qbc = QbClient(st)
+        // Un téléchargement vient de se terminer : on laisse à Radarr/Sonarr le temps d'importer, puis on force Jellyfin
+        qbc.onComplete = {
+            thread {
+                Thread.sleep(90000)
+                Jellyfin.refresh(st)
+                Thread.sleep(120000)
+                Jellyfin.refresh(st)
+            }
+        }
         queue = QueueTab(this, st, qbc)
         qb = QbTab(this, st, qbc)
         val links = LinksTab(this, st)
@@ -181,6 +190,15 @@ class MainActivity : Activity() {
                     .setNegativeButton("Annuler", null).show()
             }
         ))
+
+        col.addView(section("Jellyfin"))
+        col.addView(btn("Actualiser la bibliothèque", Pal.BLUE, 56) {
+            msg.text = "…"
+            thread {
+                val t = Jellyfin.refresh(st)
+                runOnUiThread { msg.text = t }
+            }
+        })
 
         msg = tv("", 14f, Pal.MUTED)
         msg.gravity = Gravity.CENTER

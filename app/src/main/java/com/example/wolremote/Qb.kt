@@ -11,10 +11,13 @@ class QbClient(private val st: Settings) {
     private var failAt = 0L
     private var failMsg = ""
 
+    var onComplete: (() -> Unit)? = null
+    private var seen: HashMap<String, Boolean>? = null
+
     class Result(val err: String, val data: JSONArray)
 
     private fun req(method: String, path: String, form: String? = null): Resp {
-        val base = st.base(8080)
+        val base = st.base(st.qbPort())
         val c = URL(base + path).openConnection() as HttpURLConnection
         c.requestMethod = method
         c.connectTimeout = 3000
@@ -50,12 +53,12 @@ class QbClient(private val st: Settings) {
     fun torrents(): Result {
         val empty = JSONArray()
         try {
-            if (st.active.isEmpty() && !st.reach(8080)) return Result("qBittorrent injoignable (PC éteint ou hors réseau).", empty)
+            if (st.active.isEmpty() && !st.reach(st.qbPort())) return Result("qBittorrent injoignable (PC éteint ou hors réseau).", empty)
             var r = try {
                 req("GET", "/api/v2/torrents/info")
             } catch (e: java.io.IOException) {
                 st.active = ""
-                if (!st.reach(8080)) return Result("qBittorrent injoignable (PC éteint ou hors réseau).", empty)
+                if (!st.reach(st.qbPort())) return Result("qBittorrent injoignable (PC éteint ou hors réseau).", empty)
                 req("GET", "/api/v2/torrents/info")
             }
             if (r.code == 401 || r.code == 403) {
@@ -76,7 +79,20 @@ class QbClient(private val st: Settings) {
                 r = req("GET", "/api/v2/torrents/info")
             }
             if (!r.ok) return Result("Erreur qBittorrent (HTTP " + r.code + ") : " + r.body.take(100), empty)
-            return Result("", JSONArray(r.body))
+            val arr = JSONArray(r.body)
+            val now = HashMap<String, Boolean>()
+            var finished = false
+            val prev = seen
+            for (i in 0 until arr.length()) {
+                val o = arr.optJSONObject(i) ?: continue
+                val h = o.optString("hash")
+                val done = o.optDouble("progress", 0.0) >= 1.0
+                now[h] = done
+                if (prev != null && done && prev[h] == false) finished = true
+            }
+            seen = now
+            if (finished) onComplete?.invoke()
+            return Result("", arr)
         } catch (e: Exception) {
             return Result("Erreur qBittorrent : " + e.message, empty)
         }

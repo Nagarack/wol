@@ -60,6 +60,7 @@ class Settings(ctx: Context) {
             "url" to "http://100.124.61.8:8080",   // serveur Wake-on-LAN (tablette, via Tailscale)
             "pin" to "",
             "kTarifKwh" to "0.20",
+            "pQb" to "8080",
             "host" to "192.168.1.19",              // PC, réseau local
             "host2" to "100.77.121.120"            // PC, Tailscale
         )
@@ -70,6 +71,8 @@ class Settings(ctx: Context) {
 
     fun get(k: String): String = p.getString(k, null) ?: DEFAULTS[k] ?: ""
     fun put(k: String, v: String) { p.edit().putString(k, v).apply() }
+
+    fun qbPort(): Int = get("pQb").trim().toIntOrNull() ?: 8080
 
     fun tablet(): String = get("url").trim().trimEnd('/')
     fun pin(): String = get("pin")

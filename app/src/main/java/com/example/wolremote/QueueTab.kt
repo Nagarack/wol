@@ -31,7 +31,7 @@ class QueueTab(private val a: Activity, private val st: Settings, private val qb
         col.addView(list)
         col.addView(a.btn("Ouvrir qBittorrent", Pal.GRAY) {
             try {
-                a.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(st.base(8080))))
+                a.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(st.base(st.qbPort()))))
             } catch (e: Exception) {
                 info.text = "Impossible d'ouvrir le navigateur."
             }

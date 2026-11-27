@@ -22,7 +22,7 @@ class LinksTab(private val a: Activity, private val st: Settings) {
         col.addView(link("Prowlarr", 9696, Pal.PURPLE))
         col.addView(link("Radarr", 7878, Pal.AMBER))
         col.addView(link("Sonarr", 8989, Pal.BLUE))
-        col.addView(link("qBittorrent", 8080, Pal.GREEN))
+        col.addView(link("qBittorrent", st.qbPort(), Pal.GREEN))
         info.setPadding(0, a.dp(14), 0, 0)
         col.addView(info)
     }
