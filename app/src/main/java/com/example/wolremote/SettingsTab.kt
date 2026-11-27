@@ -140,6 +140,39 @@ class SettingsTab(private val a: Activity, private val st: Settings) {
         }
         col.addView(vacB)
 
+        grp("Serveur (tablette et PC)")
+        col.addView(a.tv("Met à jour le programme de la tablette et l'agent du PC depuis GitHub, sans copier de fichier.", 13f, Pal.MUTED))
+        val srv = a.tv("", 14f, Pal.FG)
+        srv.setPadding(0, a.dp(10), 0, 0)
+        col.addView(srv)
+        fun vtxt(v: Int?) = if (v == null) "ancienne version" else "v$v"
+        fun checkSrv() {
+            srv.text = "Vérification…"
+            thread {
+                val t = try {
+                    val s = ServerUpdate.check(st)
+                    "Dernière : v" + s.latest + "\nTablette : " + vtxt(s.tablet) + (if (s.tabletOld) "  (à mettre à jour)" else "  (à jour)") +
+                        "\nAgent du PC : " + vtxt(s.agent) + (if (s.agentOld) "  (à mettre à jour)" else "  (à jour)")
+                } catch (e: Exception) { "Vérification impossible : " + e.message }
+                a.runOnUiThread { srv.text = t }
+            }
+        }
+        col.addView(a.btn2("Vérifier les versions") { checkSrv() })
+        col.addView(a.btn2("Mettre à jour la tablette") {
+            srv.text = "Mise à jour de la tablette…"
+            thread {
+                val m = ServerUpdate.updateTablet(st)
+                a.runOnUiThread { srv.text = m }
+            }
+        })
+        col.addView(a.btn2("Mettre à jour l'agent du PC") {
+            srv.text = "Mise à jour de l'agent…"
+            thread {
+                val m = ServerUpdate.updateAgent(st)
+                a.runOnUiThread { srv.text = m }
+            }
+        })
+
         grp("Sauvegarde")
         col.addView(a.tv("Exporte tes réglages (clés API, PIN…) dans un fichier protégé par un mot de passe, pour les retrouver après une réinstallation.", 13f, Pal.MUTED))
         col.addView(a.btn("Exporter mes réglages", Pal.GRAY) {

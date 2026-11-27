@@ -24,6 +24,7 @@ class MainActivity : Activity() {
     private lateinit var game: TextView
     private lateinit var msg: TextView
     private lateinit var vac: TextView
+    private lateinit var upd: TextView
     private lateinit var bWake: Button
     private lateinit var bOff: Button
     private lateinit var bRestart: Button
@@ -146,6 +147,13 @@ class MainActivity : Activity() {
         super.onResume()
         handler.post(poll)
         updater.check()
+        thread {
+            try {
+                val s = ServerUpdate.check(st)
+                val old = s.tablet != null && s.agent != null && (s.tabletOld || s.agentOld)
+                runOnUiThread { upd.visibility = if (old) View.VISIBLE else View.GONE }
+            } catch (e: Exception) { }
+        }
         if (st.get("kWatch") == "1" && st.get("kVac") != "1") WatchService.start(this)
     }
     override fun onPause() { super.onPause(); handler.removeCallbacks(poll); settingsTab.persist() }
@@ -206,6 +214,9 @@ class MainActivity : Activity() {
         vac = tv("Mode vacances : alertes et surveillance désactivées.", 13f, Pal.MUTED)
         vac.visibility = View.GONE
         col.addView(vac)
+        upd = tv("Mise à jour du serveur disponible : Réglages, Serveur.", 13f, Pal.BLUE)
+        upd.visibility = View.GONE
+        col.addView(upd)
 
         val hero = card()
         status = tv("Vérification…", 28f, Pal.MUTED)
