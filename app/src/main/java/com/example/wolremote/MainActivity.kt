@@ -33,7 +33,7 @@ class MainActivity : Activity() {
 
     private val poll = object : Runnable {
         override fun run() {
-            if (current == 0) refreshPc()
+            if (current == 0) { refreshPc(); power.refresh() }
             if (current == 2) queue.refresh()
             if (current == 3) qb.refresh()
             handler.postDelayed(this, 2000)
@@ -94,6 +94,7 @@ class MainActivity : Activity() {
         show(0)
     }
 
+    private val power by lazy { PowerCard(this, st) }
     private val updater by lazy { Updater(this) }
     override fun onResume() { super.onResume(); handler.post(poll); updater.check() }
     override fun onPause() { super.onPause(); handler.removeCallbacks(poll) }
@@ -117,7 +118,7 @@ class MainActivity : Activity() {
             v.alpha = 0f
             v.animate().alpha(1f).setDuration(160).start()
         }
-        if (i == 0) refreshPc()
+        if (i == 0) { refreshPc(); power.refresh() }
         if (i == 2) queue.refresh()
         if (i == 3) qb.refresh()
     }
@@ -159,6 +160,7 @@ class MainActivity : Activity() {
         hero.addView(status)
         hero.addView(game)
         col.addView(hero)
+        col.addView(power.view)
 
         col.addView(section("Ordinateur"))
         col.addView(pair(
