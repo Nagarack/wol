@@ -1,9 +1,7 @@
 package com.example.wolremote
 
 import android.app.Activity
-import android.content.Intent
 import android.graphics.Color
-import android.speech.RecognizerIntent
 import android.graphics.drawable.GradientDrawable
 import android.text.InputType
 import android.view.Gravity
@@ -26,6 +24,7 @@ class SearchTab(private val a: Activity, private val st: Settings) {
     private val status = a.tv("", 13f, Pal.MUTED)
     private val query: EditText = a.field("Film, série, animé…", "")
     private val chips = LinearLayout(a)
+    private val wakeBtn = a.btn2("Réveiller le PC et chercher", Pal.FG, 46) { wakeAndSearch() }
     private val results = LinearLayout(a)
     private var all: List<Rel> = emptyList()
     private var filter = ""
@@ -82,38 +81,20 @@ class SearchTab(private val a: Activity, private val st: Settings) {
         sr.addView(sb)
         header.addView(sr)
 
-        // Type de recherche : cible les catégories de Prowlarr pour réduire le bruit
-        val kindRow = LinearLayout(a)
-        kindRow.orientation = LinearLayout.HORIZONTAL
-        kindRow.setPadding(0, a.dp(10), 0, 0)
-        fun kindChips() {
-            kindRow.removeAllViews()
-            for ((lbl, v) in listOf("Tout" to "", "Films" to "movie", "Séries" to "tv")) {
-                val sel = kind == v
-                val t = a.tv(lbl, 14f, if (sel) Color.WHITE else Pal.MUTED)
-                t.setPadding(a.dp(14), a.dp(8), a.dp(14), a.dp(8))
-                t.background = a.rounded(if (sel) Pal.BLUE else Pal.CARD, 20, if (sel) Pal.BLUE else Pal.BORDER)
-                t.setOnClickListener { kind = v; st.put("sKind", v); kindChips() }
-                val lp = LinearLayout.LayoutParams(WRAP, WRAP); lp.rightMargin = a.dp(8)
-                kindRow.addView(t, lp)
-            }
-            val mic = a.tv("Dicter", 14f, Pal.FG)
-            mic.setPadding(a.dp(14), a.dp(8), a.dp(14), a.dp(8))
-            mic.background = a.rounded(Pal.CARD, 20, Pal.BORDER)
-            mic.setOnClickListener { dictate() }
-            kindRow.addView(mic)
-        }
-        kindChips()
-        header.addView(kindRow)
-
-        header.addView(a.btn2("Réveiller le PC et chercher", Pal.FG, 46) { wakeAndSearch() })
-
+        // Une seule rangée : type de recherche + filtres
         val hs = HorizontalScrollView(a)
         hs.isHorizontalScrollBarEnabled = false
         chips.orientation = LinearLayout.HORIZONTAL
         chips.setPadding(0, a.dp(10), 0, 0)
         hs.addView(chips)
         header.addView(hs)
+
+        // « Réveiller » n'apparaît que si le PC ne répond pas
+        wakeBtn.visibility = View.GONE
+        header.addView(wakeBtn)
+        thread {
+            if (!st.probe()) ui { wakeBtn.visibility = View.VISIBLE; setDots(listOf(false, null, null)) }
+        }
 
         status.setPadding(a.dp(2), a.dp(8), 0, a.dp(4))
         header.addView(status)
@@ -166,25 +147,6 @@ class SearchTab(private val a: Activity, private val st: Settings) {
         clear.setPadding(a.dp(2), a.dp(14), 0, a.dp(8))
         clear.setOnClickListener { st.put("sHist", ""); showHistory() }
         results.addView(clear)
-    }
-
-    private fun dictate() {
-        try {
-            val i = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
-            i.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            i.putExtra(RecognizerIntent.EXTRA_LANGUAGE, "fr-FR")
-            i.putExtra(RecognizerIntent.EXTRA_PROMPT, "Titre à chercher")
-            @Suppress("DEPRECATION")
-            a.startActivityForResult(i, 81)
-        } catch (e: Exception) {
-            setStatus("Reconnaissance vocale indisponible sur ce téléphone.")
-        }
-    }
-
-    fun onResult(req: Int, res: Int, data: Intent?) {
-        if (req != 81 || res != Activity.RESULT_OK) return
-        val t = data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()
-        if (!t.isNullOrEmpty()) { query.setText(t); search() }
     }
 
     private fun norm(s: String): String =
@@ -374,7 +336,7 @@ class SearchTab(private val a: Activity, private val st: Settings) {
         thread {
             try {
                 if (!st.probe()) {
-                    ui { setStatus("PC injoignable. Utilise « Réveiller et chercher ».") }
+                    ui { setStatus("PC injoignable. Utilise « Réveiller le PC et chercher »."); wakeBtn.visibility = View.VISIBLE }
                     return@thread
                 }
                 val r = Net.call("GET", st.base(9696) + "/api/v1/search?query=" + Net.enc(q) + "&type=search" + (if (kind == "movie") "&categories=2000" else if (kind == "tv") "&categories=5000" else ""), key, timeout = 120000)
@@ -395,6 +357,15 @@ class SearchTab(private val a: Activity, private val st: Settings) {
         }
     }
 
+    // Films : pas de séries ni d'animés en épisodes ; Séries : épisodes et saisons
+    private fun kindOk(r: Rel): Boolean {
+        if (kind.isEmpty()) return true
+        val series = Regex("s\\d{1,2}e\\d{1,3}|\\bs\\d{2}\\b|saison|season|épisode|episode", RegexOption.IGNORE_CASE).containsMatchIn(r.title)
+        val tvCat = r.cats.any { it.first in 5000..5999 }
+        val movCat = r.cats.any { it.first in 2000..2999 }
+        return if (kind == "movie") !series && !(tvCat && !movCat) else (series || tvCat || r.cats.isEmpty())
+    }
+
     private fun videoOnly(): Boolean = st.get("videoOnly") != "0"
 
     private fun render() {
@@ -408,28 +379,25 @@ class SearchTab(private val a: Activity, private val st: Settings) {
         val vis = if (strict && toks.isNotEmpty()) vis0.filter { r -> val n = norm(r.title); toks.all { n.contains(it) } } else vis0
         val offTopic = vis0.size - vis.size
         val hidden = all.size - vis0.size
-        setStatus(vis.size.toString() + " résultat(s)" + (if (hidden > 0) " · $hidden masqué(s) (jeux, musique, logiciels…)" else "") +
-            (if (offTopic > 0) " · $offTopic hors sujet" else ""))
-        val nf = listOf(fQ.isNotEmpty(), fL.isNotEmpty(), fS != 0, fSort != "seeders", fY != 0, fP != 0).count { it }
-        val fc = a.tv(if (nf > 0) "Filtres ($nf)" else "Filtres", 14f, Color.WHITE)
+        val nf = listOf(fQ.isNotEmpty(), fL.isNotEmpty(), fS != 0, fSort != "seeders", fY != 0, fP != 0, filter.isNotEmpty(), !strict, !vo).count { it }
+        for ((lbl, v) in listOf("Tout" to "", "Films" to "movie", "Séries" to "tv")) {
+            val sel = kind == v
+            val t = a.tv(lbl, 14f, if (sel) Color.WHITE else Pal.MUTED)
+            t.setPadding(a.dp(14), a.dp(8), a.dp(14), a.dp(8))
+            t.background = a.rounded(if (sel) Pal.BLUE else Pal.CARD, 20, if (sel) Pal.BLUE else Pal.BORDER)
+            t.setOnClickListener { kind = v; st.put("sKind", v); if (lastQuery.isNotEmpty()) search() else render() }
+            val lp = LinearLayout.LayoutParams(WRAP, WRAP); lp.rightMargin = a.dp(8)
+            chips.addView(t, lp)
+        }
+        val fc = a.tv(if (nf > 0) "Filtres ($nf)" else "Filtres", 14f, if (nf > 0) Color.WHITE else Pal.FG)
         fc.setPadding(a.dp(14), a.dp(8), a.dp(14), a.dp(8))
-        fc.background = a.rounded(if (nf > 0) Pal.BLUE else Pal.GRAY, 20)
+        fc.background = a.rounded(if (nf > 0) Pal.GRAY else Pal.CARD, 20, if (nf > 0) Pal.GRAY else Pal.BORDER)
         fc.setOnClickListener { filtersDialog() }
         val flp = LinearLayout.LayoutParams(WRAP, WRAP)
-        flp.rightMargin = a.dp(8)
+        flp.leftMargin = a.dp(8)
         chips.addView(fc, flp)
-        addToggleChip("Films / séries / animés seulement", vo)
-        val sc2 = a.tv(if (strict) "✓ Titre exact" else "Titre exact", 14f, Color.WHITE)
-        sc2.setPadding(a.dp(14), a.dp(8), a.dp(14), a.dp(8))
-        sc2.background = a.rounded(if (strict) Pal.GREEN else Pal.GRAY, 20)
-        sc2.setOnClickListener { st.put("sStrict", if (strict) "0" else "1"); render() }
-        val slp3 = LinearLayout.LayoutParams(WRAP, WRAP)
-        slp3.rightMargin = a.dp(8)
-        chips.addView(sc2, slp3)
-        val names = vis.map { it.indexer }.distinct().sorted()
-        addChip("Tous (" + vis.size + ")", "")
-        for (n in names) addChip(n + " (" + vis.count { it.indexer == n } + ")", n)
         val shown = vis.filter { filter.isEmpty() || it.indexer == filter }
+            .filter { kindOk(it) }
             .filter { fQ.isEmpty() || it.quality() == fQ }
             .filter { fL.isEmpty() || (fL == "vf" && (it.lang() == "VF" || it.lang() == "MULTI")) || (fL == "vostfr" && it.lang() == "VOSTFR") }
             .filter { fS == 0 || it.size <= fS * 1000000000L }
@@ -444,6 +412,7 @@ class SearchTab(private val a: Activity, private val st: Settings) {
             }
             .let { l -> when (fSort) { "size" -> l.sortedBy { it.size }; "date" -> l.sortedByDescending { it.date }; else -> l.sortedByDescending { it.seeders } } }
             .take(100)
+        setStatus(shown.size.toString() + " résultat(s)" + (if (hidden > 0 || offTopic > 0) " · " + (hidden + offTopic) + " masqué(s)" else ""))
         for (r in shown) results.addView(card(r))
         if (shown.isEmpty()) results.addView(a.tv("Aucun résultat.", 14f, Pal.MUTED))
         else results.addView(a.tv("Appui long sur un résultat pour en sélectionner plusieurs.", 13f, Pal.MUTED), 0)
@@ -475,6 +444,10 @@ class SearchTab(private val a: Activity, private val st: Settings) {
                 hs.addView(row)
                 body.addView(hs)
             }
+            val names = all.map { it.indexer }.distinct().sorted()
+            group("Indexeur", listOf("Tous" to "") + names.map { it to it }, filter) { filter = it }
+            group("Contenu", listOf("Vidéo seulement" to "1", "Tout (jeux, musique…)" to "0"), if (videoOnly()) "1" else "0") { st.put("videoOnly", it) }
+            group("Correspondance", listOf("Titre exact" to "1", "Large" to "0"), if (st.get("sStrict") != "0") "1" else "0") { st.put("sStrict", it) }
             group("Qualité", listOf("Toutes" to "", "4K" to "4K", "1080p" to "1080p", "720p" to "720p", "SD" to "SD"), fQ) { fQ = it; st.put("sQ", it) }
             group("Langue", listOf("Toutes" to "", "VF / Multi" to "vf", "VOSTFR" to "vostfr"), fL) { fL = it; st.put("sL", it) }
             val years = all.map { it.year() }.filter { it > 0 }.groupingBy { it }.eachCount().entries.sortedByDescending { it.key }.take(7)
@@ -488,80 +461,49 @@ class SearchTab(private val a: Activity, private val st: Settings) {
         sv.addView(body)
         a.dialogBuilder().setTitle("Filtres").setView(sv)
             .setNeutralButton("Réinitialiser") { _, _ ->
-                fQ = ""; fL = ""; fS = 0; fSort = "seeders"; fY = 0; fP = 0
+                fQ = ""; fL = ""; fS = 0; fSort = "seeders"; fY = 0; fP = 0; filter = ""; st.put("videoOnly", "1"); st.put("sStrict", "1")
                 st.put("sQ", ""); st.put("sL", ""); st.put("sS", "0"); st.put("sSort", "seeders")
                 render()
             }
             .setPositiveButton("Fermer", null).show()
     }
 
-    private fun addToggleChip(label: String, on: Boolean) {
-        val t = a.tv(if (on) "✓ $label" else label, 14f, Color.WHITE)
-        t.setPadding(a.dp(14), a.dp(8), a.dp(14), a.dp(8))
-        t.background = a.rounded(if (on) Pal.GREEN else Pal.GRAY, 20)
-        t.setOnClickListener {
-            st.put("videoOnly", if (on) "0" else "1")
-            filter = ""
-            render()
-        }
-        val lp = LinearLayout.LayoutParams(WRAP, WRAP)
-        lp.rightMargin = a.dp(8)
-        chips.addView(t, lp)
-    }
-
-    private fun addChip(label: String, value: String) {
-        val sel = filter == value
-        val t = a.tv(label, 14f, if (sel) Color.WHITE else Pal.MUTED)
-        t.setPadding(a.dp(14), a.dp(8), a.dp(14), a.dp(8))
-        t.background = a.rounded(if (sel) Pal.BLUE else Pal.CARD, 20, if (sel) Pal.BLUE else Pal.BORDER)
-        t.setOnClickListener { filter = value; render() }
-        val lp = LinearLayout.LayoutParams(WRAP, WRAP)
-        lp.rightMargin = a.dp(8)
-        chips.addView(t, lp)
-    }
-
     private fun card(r: Rel): View {
         val c = a.card()
         val t = a.tv(r.title, 15f, Pal.FG)
-        t.maxLines = 3
+        t.maxLines = 2
         t.ellipsize = android.text.TextUtils.TruncateAt.END
         c.addView(t)
-        val go = r.size / 1000000000.0
-        val bl = LinearLayout(a)
-        bl.orientation = LinearLayout.HORIZONTAL
+        val bl = FlowRow(a, a.dp(6), a.dp(6))
         bl.setPadding(0, a.dp(8), 0, 0)
-        fun tag(txt: String, colr: Int) {
-            val lp = LinearLayout.LayoutParams(WRAP, WRAP)
-            lp.rightMargin = a.dp(6)
-            bl.addView(a.badge(txt, colr), lp)
-        }
-        tag(String.format(Locale.FRANCE, "%.2f Go", go), Pal.MUTED)
-        val sc = if (r.seeders >= 20) Pal.GREEN else if (r.seeders >= 5) Pal.MUTED else Pal.RED
-        tag(r.seeders.toString() + " seeders", sc)
+        fun tag(txt: String, colr: Int) { bl.addView(a.badge(txt, colr)) }
+        tag(String.format(Locale.FRANCE, "%.2f Go", r.size / 1000000000.0), Pal.MUTED)
+        tag(r.seeders.toString() + " seeders", if (r.seeders >= 20) Pal.GREEN else if (r.seeders >= 5) Pal.MUTED else Pal.RED)
         if (r.quality().isNotEmpty()) tag(r.quality(), Pal.BLUE)
         if (r.lang().isNotEmpty()) tag(r.lang(), if (r.lang() == "VOSTFR") Pal.MUTED else Pal.GREEN)
-        tag(if ((dups[r.guid] ?: 1) > 1) r.indexer + " +" + ((dups[r.guid] ?: 1) - 1) else r.indexer, Pal.MUTED)
-        when (libState(r)) {
-            "file" -> tag("Déjà dans la bibliothèque", Pal.GREEN)
-            "series" -> tag("Série déjà suivie", Pal.GREEN)
-            "tracked" -> tag("Suivi, pas encore téléchargé", Pal.MUTED)
-        }
-        if (r.date.length >= 10) tag(r.date.take(10), Pal.MUTED)
         c.addView(bl)
+        val n = dups[r.guid] ?: 1
+        c.addView(a.tv(r.indexer + (if (n > 1) " +" + (n - 1) else "") + (if (r.date.length >= 10) "  ·  " + r.date.take(10) else ""), 12f, Pal.MUTED).also { it.setPadding(0, a.dp(6), 0, 0) })
+        when (libState(r)) {
+            "file" -> c.addView(a.tv("Déjà dans ta bibliothèque", 13f, Pal.GREEN))
+            "series" -> c.addView(a.tv("Série déjà suivie", 13f, Pal.GREEN))
+            "tracked" -> c.addView(a.tv("Suivi dans Radarr, pas encore téléchargé", 13f, Pal.MUTED))
+        }
         val row = LinearLayout(a)
         row.orientation = LinearLayout.HORIZONTAL
-        fun b(label: String, color: Int, f: () -> Unit) {
-            val x = a.btn(label, color, 44, f)
-            val lp = LinearLayout.LayoutParams(0, a.dp(44), 1f)
+        fun b(label: String, primary: Boolean, w: Float, f: () -> Unit) {
+            val x = if (primary) a.btn(label, Pal.BLUE, 44, f) else a.btn2(label, Pal.FG, 44, f)
+            val lp = LinearLayout.LayoutParams(0, WRAP, w)
             lp.topMargin = a.dp(10)
             lp.leftMargin = a.dp(3)
             lp.rightMargin = a.dp(3)
             x.layoutParams = lp
             row.addView(x)
         }
-        b("Autre", Pal.GRAY) { sendOther(r) }
-        b("Film", Pal.BLUE) { flowMovie(r) }
-        b("Série", Pal.BLUE) { flowSeries(r) }
+        // Boutons selon le type recherché : moins de choix à chaque carte
+        if (kind != "tv") b("Film", true, 1f) { flowMovie(r) }
+        if (kind != "movie") b("Série", true, 1f) { flowSeries(r) }
+        b("Autre", false, 1f) { sendOther(r) }
         c.addView(row)
         c.background = a.rounded(Pal.CARD, 16, if (selected.contains(r.guid)) Pal.BLUE else Pal.BORDER)
         c.setOnLongClickListener { toggle(r, c); true }

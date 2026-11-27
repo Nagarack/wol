@@ -69,6 +69,7 @@ class SettingsTab(private val a: Activity, private val st: Settings) {
         add("Clé API Prowlarr", "kProwlarr", pw)
         add("Clé API Radarr", "kRadarr", pw)
         add("Clé API Sonarr", "kSonarr", pw)
+        add("Clé API TMDb (facultative, gratuite : suggestions Découvrir)", "kTmdb", pw)
         grp("Qualité")
         add("Profil de qualité Radarr (ID, vide = le premier)", "pRadarr", num)
         add("Profil de qualité Sonarr (ID, vide = le premier)", "pSonarr", num)

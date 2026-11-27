@@ -141,7 +141,6 @@ class MainActivity : Activity() {
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: android.content.Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         settingsTab.onResult(requestCode, resultCode, data)
-        searchTab.onResult(requestCode, resultCode, data)
     }
 
     private val power by lazy { PowerCard(this, st) }

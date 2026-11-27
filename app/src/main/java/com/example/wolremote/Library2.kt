@@ -129,25 +129,25 @@ object Discover {
         return null
     }
 
+    var lastInfo = ""
+
     fun items(st: Settings, label: String): List<JSONObject> {
         val id = lists(st).firstOrNull { it.str("name") == nameOf(label) }?.optInt("id", -1) ?: -1
         val r = get(st, "/api/v3/importlist/movie", 60000)
         if (!r.ok) throw Exception("Radarr : HTTP " + r.code)
         val a = JSONArray(r.body)
-        val out = ArrayList<JSONObject>()
+        val fresh = ArrayList<JSONObject>()
         for (i in 0 until a.length()) {
             val o = a.optJSONObject(i) ?: continue
             if (o.optBoolean("isExisting") || o.optBoolean("isExcluded") || o.optInt("id", 0) > 0) continue
-            val ls = o.optJSONArray("lists")
-            if (id >= 0 && ls != null) {
-                var ok = false
-                for (k in 0 until ls.length()) if (ls.optInt(k) == id) ok = true
-                if (!ok) continue
-            }
-            out.add(o)
-            if (out.size >= 40) break
+            fresh.add(o)
         }
-        return out
+        val ofList = if (id < 0) fresh else fresh.filter { o ->
+            val ls = o.optJSONArray("lists")
+            ls == null || (0 until ls.length()).any { ls.optInt(it) == id }
+        }
+        lastInfo = "Radarr a renvoyé " + a.length() + " suggestion(s), " + fresh.size + " nouvelle(s), " + ofList.size + " dans cette liste. La synchronisation peut prendre quelques minutes ; sinon, utilise une clé TMDb (Réglages, Clés API)."
+        return (if (ofList.isEmpty()) fresh else ofList).take(40)
     }
 }
 
@@ -239,6 +239,53 @@ object Shows {
     }
 }
 
+// Suggestions via TMDb (clé gratuite, facultative) : populaires, au cinéma, à l'antenne…
+object Tmdb {
+    val MOVIE = listOf("Populaires" to "popular", "Au cinéma" to "now_playing", "À venir" to "upcoming", "Mieux notés" to "top_rated")
+    val TV = listOf("Populaires" to "popular", "À l'antenne" to "on_the_air", "Aujourd'hui" to "airing_today", "Mieux notées" to "top_rated")
+    fun has(st: Settings) = st.get("kTmdb").trim().isNotEmpty()
+
+    fun list(st: Settings, tv: Boolean, label: String): List<JSONObject> {
+        val kind = if (tv) "tv" else "movie"
+        val ep = (if (tv) TV else MOVIE).firstOrNull { it.first == label }?.second ?: "popular"
+        val key = st.get("kTmdb").trim()
+        val have = HashSet<Int>()
+        val k2 = st.get(if (tv) "kSonarr" else "kRadarr")
+        if (k2.isNotEmpty()) {
+            val r = Net.call("GET", st.base(if (tv) 8989 else 7878) + "/api/v3/" + (if (tv) "series" else "movie"), k2, timeout = 20000)
+            if (r.ok) { val a = JSONArray(r.body); for (i in 0 until a.length()) have.add(a.optJSONObject(i)?.optInt("tmdbId") ?: 0) }
+        }
+        val out = ArrayList<JSONObject>()
+        for (page in 1..2) {
+            val r = Net.call("GET", "https://api.themoviedb.org/3/$kind/$ep?api_key=$key&language=fr-FR&region=FR&page=$page", timeout = 15000)
+            if (r.code == 401) throw Exception("clé TMDb refusée")
+            if (!r.ok) throw Exception("TMDb : HTTP " + r.code)
+            val a = JSONObject(r.body).optJSONArray("results") ?: break
+            for (i in 0 until a.length()) {
+                val o = a.optJSONObject(i) ?: continue
+                val id = o.optInt("id")
+                if (have.contains(id)) continue
+                val date = o.str(if (tv) "first_air_date" else "release_date")
+                val p = o.str("poster_path")
+                out.add(JSONObject().put("title", o.str(if (tv) "name" else "title")).put("year", date.take(4).toIntOrNull() ?: 0)
+                    .put("overview", o.str("overview")).put("remotePoster", if (p.isEmpty()) "" else "https://image.tmdb.org/t/p/w185$p")
+                    .put("tmdbId", id).put("tv", tv)
+                    .put("sub", if (o.optDouble("vote_average", 0.0) > 0) String.format(java.util.Locale.FRANCE, "Note %.1f / 10", o.optDouble("vote_average")) else ""))
+            }
+        }
+        return out.take(40)
+    }
+
+    // Série : TMDb → identifiant TVDB → ajout dans Sonarr
+    fun addTv(st: Settings, tmdb: Int): String? {
+        val r = Net.call("GET", "https://api.themoviedb.org/3/tv/$tmdb/external_ids?api_key=" + st.get("kTmdb").trim(), timeout = 15000)
+        if (!r.ok) return "TMDb : HTTP " + r.code
+        val tvdb = JSONObject(r.body).optInt("tvdb_id", 0)
+        if (tvdb == 0) return "pas d'identifiant TVDB pour cette série"
+        return Shows.add(st, tvdb)
+    }
+}
+
 object LibraryUi5 {
     fun discover(a: Activity, st: Settings) {
         val body = LinearLayout(a); body.orientation = LinearLayout.VERTICAL
@@ -258,7 +305,7 @@ object LibraryUi5 {
         dialog(a, "Découvrir", body)
         var mode = "films"
         var cur = Discover.KINDS[0].first
-        fun kinds(): List<String> = if (mode == "films") Discover.KINDS.map { it.first } else Shows.KINDS
+        fun kinds(): List<String> = if (Tmdb.has(st)) (if (mode == "films") Tmdb.MOVIE else Tmdb.TV).map { it.first } else if (mode == "films") Discover.KINDS.map { it.first } else Shows.KINDS
 
         fun chip(label: String, sel: Boolean, click: () -> Unit): android.widget.TextView {
             val t = a.tv(label, 14f, if (sel) android.graphics.Color.WHITE else Pal.MUTED)
@@ -274,7 +321,7 @@ object LibraryUi5 {
 
         fun show(l: List<JSONObject>) {
             list.removeAllViews()
-            info.text = if (l.isEmpty()) "Rien pour l'instant. Réessaie dans une minute." else "Touche un titre pour l'ajouter et lancer son téléchargement."
+            info.text = if (l.isEmpty()) "Rien pour l'instant. " + (if (mode == "films" && !Tmdb.has(st)) Discover.lastInfo else "Réessaie dans une minute.") else "Touche un titre pour l'ajouter et lancer son téléchargement."
             for (o in l) {
                 val isShow = o.has("tvdbId")
                 val row = LinearLayout(a); row.orientation = LinearLayout.HORIZONTAL
@@ -295,7 +342,7 @@ object LibraryUi5 {
                     row.setOnClickListener(null)
                     state.text = "Ajout…"
                     thread {
-                        val err = try { if (isShow) Shows.add(st, o.optInt("tvdbId")) else Sagas.add(st, o.optInt("tmdbId")) } catch (e: Exception) { e.message ?: "erreur" }
+                        val err = try { if (o.optBoolean("tv")) Tmdb.addTv(st, o.optInt("tmdbId")) else if (isShow) Shows.add(st, o.optInt("tvdbId")) else Sagas.add(st, o.optInt("tmdbId")) } catch (e: Exception) { e.message ?: "erreur" }
                         a.runOnUiThread { state.text = if (err == null) "Ajouté, recherche lancée." else "Échec : $err"; state.setTextColor(if (err == null) Pal.GREEN else Pal.RED) }
                     }
                 }
@@ -309,7 +356,7 @@ object LibraryUi5 {
             val m = mode
             thread {
                 try {
-                    val l = if (m == "films") Discover.items(st, label) else Shows.items(st, label)
+                    val l = if (Tmdb.has(st)) Tmdb.list(st, m != "films", label) else if (m == "films") Discover.items(st, label) else Shows.items(st, label)
                     a.runOnUiThread { if (m == mode) show(l) }
                 } catch (e: Exception) {
                     a.runOnUiThread { info.text = "Erreur : " + e.message }
@@ -325,7 +372,7 @@ object LibraryUi5 {
         fun start() {
             chipsRender()
             list.removeAllViews()
-            if (mode == "series") { load(cur); return }
+            if (mode == "series" || Tmdb.has(st)) { load(cur); return }
             info.text = "Chargement…"
             thread {
                 try {

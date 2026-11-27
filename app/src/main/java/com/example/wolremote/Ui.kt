@@ -261,3 +261,33 @@ class TouchScroll(ctx: android.content.Context) : android.widget.ScrollView(ctx)
         return super.dispatchTouchEvent(ev)
     }
 }
+
+// Rangée qui passe à la ligne quand elle est pleine (pastilles d'information)
+class FlowRow(ctx: Context, private val hgap: Int, private val vgap: Int) : android.view.ViewGroup(ctx) {
+    override fun onMeasure(wSpec: Int, hSpec: Int) {
+        val maxW = android.view.View.MeasureSpec.getSize(wSpec) - paddingLeft - paddingRight
+        var x = 0; var y = 0; var lineH = 0
+        for (i in 0 until childCount) {
+            val c = getChildAt(i)
+            if (c.visibility == android.view.View.GONE) continue
+            c.measure(android.view.View.MeasureSpec.makeMeasureSpec(maxW, android.view.View.MeasureSpec.AT_MOST), android.view.View.MeasureSpec.UNSPECIFIED)
+            if (x > 0 && x + c.measuredWidth > maxW) { x = 0; y += lineH + vgap; lineH = 0 }
+            x += c.measuredWidth + hgap
+            lineH = maxOf(lineH, c.measuredHeight)
+        }
+        setMeasuredDimension(resolveSize(android.view.View.MeasureSpec.getSize(wSpec), wSpec), y + lineH + paddingTop + paddingBottom)
+    }
+
+    override fun onLayout(changed: Boolean, l: Int, t: Int, r: Int, b: Int) {
+        val maxW = r - l - paddingLeft - paddingRight
+        var x = 0; var y = 0; var lineH = 0
+        for (i in 0 until childCount) {
+            val c = getChildAt(i)
+            if (c.visibility == android.view.View.GONE) continue
+            if (x > 0 && x + c.measuredWidth > maxW) { x = 0; y += lineH + vgap; lineH = 0 }
+            c.layout(paddingLeft + x, paddingTop + y, paddingLeft + x + c.measuredWidth, paddingTop + y + c.measuredHeight)
+            x += c.measuredWidth + hgap
+            lineH = maxOf(lineH, c.measuredHeight)
+        }
+    }
+}
