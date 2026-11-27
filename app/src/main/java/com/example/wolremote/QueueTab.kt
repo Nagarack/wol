@@ -29,7 +29,7 @@ class QueueTab(private val a: Activity, private val st: Settings) {
         col.addView(info)
         list.orientation = LinearLayout.VERTICAL
         col.addView(list)
-        col.addView(a.btn("Ouvrir qBittorrent (téléchargements « autres »)", Pal.GRAY) {
+        col.addView(a.btn("Ouvrir qBittorrent", Pal.GRAY) {
             try {
                 a.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(st.base(8080))))
             } catch (e: Exception) {

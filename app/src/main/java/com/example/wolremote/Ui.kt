@@ -98,7 +98,11 @@ fun Activity.btn(label: String, color: Int, h: Int = 52, onClick: () -> Unit): B
         b.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
         onClick()
     }
-    val lp = LinearLayout.LayoutParams(MATCH, dp(h))
+    // hauteur minimale (et non fixe) : un texte long passe à la ligne sans être coupé
+    b.minHeight = dp(h)
+    b.minimumHeight = dp(h)
+    b.setPadding(dp(14), dp(10), dp(14), dp(10))
+    val lp = LinearLayout.LayoutParams(MATCH, WRAP)
     lp.topMargin = dp(10)
     b.layoutParams = lp
     return b
