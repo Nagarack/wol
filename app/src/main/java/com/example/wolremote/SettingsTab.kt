@@ -24,20 +24,24 @@ class SettingsTab(private val a: Activity, private val st: Settings) {
         root.setPadding(a.dp(16), a.dp(16), a.dp(16), a.dp(24))
         view.addView(root)
         var col = root
+        val bodies = ArrayList<LinearLayout>()
         // Chaque rubrique est un groupe repliable : l'écran reste court
         fun grp(title: String) {
             val body = LinearLayout(a)
             body.orientation = LinearLayout.VERTICAL
-            body.visibility = android.view.View.GONE
+            bodies.add(body)
+            val wrap = a.indented(body)
+            wrap.visibility = android.view.View.GONE
             val head = a.rowItem(title, "", "+") {}
+            a.boldHead(head)
             val mark = head.getChildAt(1) as android.widget.TextView
             head.setOnClickListener {
-                val open = body.visibility == android.view.View.GONE
-                body.visibility = if (open) android.view.View.VISIBLE else android.view.View.GONE
+                val open = wrap.visibility == android.view.View.GONE
+                wrap.visibility = if (open) android.view.View.VISIBLE else android.view.View.GONE
                 mark.text = if (open) "−" else "+"
             }
             root.addView(head)
-            root.addView(body)
+            root.addView(wrap)
             col = body
         }
         col.addView(a.title("Réglages"))
@@ -192,6 +196,7 @@ class SettingsTab(private val a: Activity, private val st: Settings) {
             i.type = "*/*"
             a.startActivityForResult(i, 72)
         })
+        for (b in bodies) a.compactButtons(b)
     }
 
     fun persist() = saveAll()

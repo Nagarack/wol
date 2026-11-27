@@ -132,24 +132,52 @@ fun Activity.rowItem(label: String, sub: String = "", marker: String = "›", on
     return r
 }
 
+// Contenu d'une rubrique : décalé et repéré par un filet à gauche, pour le distinguer de l'en-tête
+fun Activity.indented(body: LinearLayout): LinearLayout {
+    val w = LinearLayout(this)
+    w.orientation = LinearLayout.HORIZONTAL
+    val line = android.view.View(this)
+    line.setBackgroundColor(Pal.BORDER)
+    val lp = LinearLayout.LayoutParams(dp(2), MATCH)
+    lp.topMargin = dp(8)
+    lp.leftMargin = dp(6)
+    w.addView(line, lp)
+    body.setPadding(dp(12), 0, 0, 0)
+    w.addView(body, LinearLayout.LayoutParams(0, WRAP, 1f))
+    return w
+}
+
+fun Activity.boldHead(head: LinearLayout) {
+    val t = (head.getChildAt(0) as LinearLayout).getChildAt(0) as TextView
+    t.typeface = Typeface.DEFAULT_BOLD
+}
+
+// Boutons d'une rubrique : plus petits que les actions principales
+fun Activity.compactButtons(v: android.view.View) {
+    if (v is Button) { v.textSize = 14f; v.minHeight = dp(44); v.minimumHeight = dp(44); v.setPadding(dp(12), dp(6), dp(12), dp(6)) }
+    if (v is android.view.ViewGroup) for (i in 0 until v.childCount) compactButtons(v.getChildAt(i))
+}
+
 // Rubrique repliable ; l'état (ouvert / fermé) est mémorisé
 fun Activity.foldable(col: LinearLayout, title: String, st: Settings, key: String, openDefault: Boolean): LinearLayout {
     val body = LinearLayout(this)
     body.orientation = LinearLayout.VERTICAL
+    val wrap = indented(body)
     val saved = st.get("fold_$key")
     val open0 = if (saved.isEmpty()) openDefault else saved == "1"
-    body.visibility = if (open0) android.view.View.VISIBLE else android.view.View.GONE
+    wrap.visibility = if (open0) android.view.View.VISIBLE else android.view.View.GONE
     val head = rowItem(title, "", if (open0) "−" else "+") {}
+    boldHead(head)
     (head.layoutParams as LinearLayout.LayoutParams).topMargin = dp(16)
     val mark = head.getChildAt(1) as TextView
     head.setOnClickListener {
-        val open = body.visibility == android.view.View.GONE
-        body.visibility = if (open) android.view.View.VISIBLE else android.view.View.GONE
+        val open = wrap.visibility == android.view.View.GONE
+        wrap.visibility = if (open) android.view.View.VISIBLE else android.view.View.GONE
         mark.text = if (open) "−" else "+"
         st.put("fold_$key", if (open) "1" else "0")
     }
     col.addView(head)
-    col.addView(body)
+    col.addView(wrap)
     return body
 }
 
