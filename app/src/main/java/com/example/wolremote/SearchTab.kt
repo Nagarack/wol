@@ -357,15 +357,22 @@ class SearchTab(private val a: Activity, private val st: Settings) {
         }
     }
 
-    // Films : pas de séries ni d'animés en épisodes ; Séries : épisodes et saisons
+    private val seriesRx = Regex("s\\d{1,2}e\\d{1,3}|\\bs\\d{2}\\b|saison|season|épisode|episode", RegexOption.IGNORE_CASE)
+    private val animeRx = Regex("^\\s*[\\[(][^\\])]{2,30}[\\])]|\\banime\\b|\\bbatch\\b|\\bOVA\\b|multi-?subs?|\\s-\\s\\d{1,3}(v\\d)?\\s|\\b(HorribleSubs|SubsPlease|Erai-raws|Judas|ToonsHub|EMBER|Anime Time|DKB)\\b", RegexOption.IGNORE_CASE)
+    private fun isAnime(r: Rel) = r.cats.any { it.first == 5070 || it.second.contains("anime", true) } || animeRx.containsMatchIn(r.title)
+
+    // Films : ni séries ni animés ; Séries : épisodes et saisons hors animés ; Animés : uniquement les animés
     private fun kindOk(r: Rel): Boolean {
         if (kind.isEmpty()) return true
-        val series = Regex("s\\d{1,2}e\\d{1,3}|\\bs\\d{2}\\b|saison|season|épisode|episode", RegexOption.IGNORE_CASE).containsMatchIn(r.title)
+        val series = seriesRx.containsMatchIn(r.title)
         val tvCat = r.cats.any { it.first in 5000..5999 }
         val movCat = r.cats.any { it.first in 2000..2999 }
-        val anime = r.cats.any { it.first == 5070 || it.second.contains("anime", true) } ||
-            Regex("^\\s*[\\[(][^\\])]{2,30}[\\])]|\\banime\\b|\\bbatch\\b|\\bOVA\\b|multi-?subs?|\\bepisodes?\\b|\\s-\\s\\d{1,3}(v\\d)?\\s|\\bS\\d{1,2}\\b|\\b(HorribleSubs|SubsPlease|Erai-raws|Judas|ToonsHub|EMBER|Anime Time|DKB)\\b", RegexOption.IGNORE_CASE).containsMatchIn(r.title)
-        return if (kind == "movie") !series && !anime && !(tvCat && !movCat) else (series || tvCat || r.cats.isEmpty())
+        val anime = isAnime(r)
+        return when (kind) {
+            "movie" -> !series && !anime && !(tvCat && !movCat)
+            "anime" -> anime
+            else -> !anime && (series || tvCat || r.cats.isEmpty())
+        }
     }
 
     private fun videoOnly(): Boolean = st.get("videoOnly") != "0"
@@ -382,7 +389,7 @@ class SearchTab(private val a: Activity, private val st: Settings) {
         val offTopic = vis0.size - vis.size
         val hidden = all.size - vis0.size
         val nf = listOf(fQ.isNotEmpty(), fL.isNotEmpty(), fS != 0, fSort != "seeders", fY != 0, fP != 0, filter.isNotEmpty(), !strict, !vo).count { it }
-        for ((lbl, v) in listOf("Tout" to "", "Films" to "movie", "Séries" to "tv")) {
+        for ((lbl, v) in listOf("Tout" to "", "Films" to "movie", "Séries" to "tv", "Animés" to "anime")) {
             val sel = kind == v
             val t = a.tv(lbl, 14f, if (sel) Color.WHITE else Pal.MUTED)
             t.setPadding(a.dp(14), a.dp(8), a.dp(14), a.dp(8))
@@ -503,14 +510,68 @@ class SearchTab(private val a: Activity, private val st: Settings) {
             row.addView(x)
         }
         // Boutons selon le type recherché : moins de choix à chaque carte
-        if (kind != "tv") b("Film", true, 1f) { flowMovie(r) }
+        if (kind != "tv" && kind != "anime") b("Film", true, 1f) { flowMovie(r) }
         if (kind != "movie") b("Série", true, 1f) { flowSeries(r) }
         b("Autre", false, 1f) { sendOther(r) }
         c.addView(row)
         c.background = a.rounded(Pal.CARD, 16, if (selected.contains(r.guid)) Pal.BLUE else Pal.BORDER)
         c.setOnLongClickListener { toggle(r, c); true }
-        c.setOnClickListener { if (selected.isNotEmpty()) toggle(r, c) }
+        c.setOnClickListener { if (selected.isNotEmpty()) toggle(r, c) else preview(r) }
         return c
+    }
+
+    // ---------- Aperçu : affiche et résumé (Radarr / Sonarr lookup) ----------
+    private fun preview(r: Rel) {
+        val box = LinearLayout(a)
+        box.orientation = LinearLayout.HORIZONTAL
+        box.setPadding(a.dp(20), a.dp(8), a.dp(20), a.dp(8))
+        val iv = ImageView(a)
+        iv.scaleType = ImageView.ScaleType.CENTER_CROP
+        iv.setBackgroundColor(Pal.CARD2)
+        box.addView(iv, LinearLayout.LayoutParams(a.dp(110), a.dp(165)))
+        val txt = LinearLayout(a)
+        txt.orientation = LinearLayout.VERTICAL
+        txt.setPadding(a.dp(14), 0, 0, 0)
+        val head = a.tv("Recherche de la fiche…", 17f, Pal.FG)
+        head.typeface = android.graphics.Typeface.DEFAULT_BOLD
+        val sub = a.tv("", 12f, Pal.MUTED)
+        val desc = a.tv("", 13f, Pal.FG)
+        desc.setPadding(0, a.dp(8), 0, 0)
+        txt.addView(head); txt.addView(sub); txt.addView(desc)
+        box.addView(txt, LinearLayout.LayoutParams(0, WRAP, 1f))
+        val sv = ScrollView(a)
+        sv.addView(box)
+        val col = LinearLayout(a)
+        col.orientation = LinearLayout.VERTICAL
+        col.addView(sv, LinearLayout.LayoutParams(MATCH, WRAP))
+        col.addView(a.tv(r.title, 11f, Pal.MUTED).also { it.setPadding(a.dp(20), a.dp(4), a.dp(20), a.dp(4)) })
+        a.dialogBuilder().setView(col).setPositiveButton("Fermer", null).show()
+        thread {
+            var found: JSONObject? = null
+            try {
+                val tvFirst = kind == "tv" || kind == "anime" || seriesRx.containsMatchIn(r.title)
+                val order = if (tvFirst) listOf(true, false) else listOf(false, true)
+                for (tv in order) {
+                    val key = st.get(if (tv) "kSonarr" else "kRadarr")
+                    if (key.isEmpty()) continue
+                    val term = if (tv) Guess.seriesTerm(r.title) else Guess.movieTerm(r.title)
+                    val l = lookupList(st.base(if (tv) 8989 else 7878) + "/api/v3/" + (if (tv) "series" else "movie") + "/lookup?term=" + Net.enc(term), key)
+                    if (l.isNotEmpty()) { found = l[0]; break }
+                }
+            } catch (e: Exception) { }
+            val o = found
+            ui {
+                if (o == null) { head.text = "Aucune fiche trouvée"; desc.text = "Le titre de la release ne correspond à aucun film ni série connu." }
+                else {
+                    val y = o.optInt("year", 0)
+                    head.text = o.str("title") + (if (y > 0) " ($y)" else "")
+                    val rt = o.optJSONObject("ratings")?.optJSONObject("tmdb")?.optDouble("value", 0.0) ?: o.optJSONObject("ratings")?.optDouble("value", 0.0) ?: 0.0
+                    sub.text = listOf(if (o.optInt("runtime", 0) > 0) o.optInt("runtime").toString() + " min" else "", if (rt > 0) String.format(Locale.FRANCE, "Note %.1f / 10", rt) else "").filter { it.isNotEmpty() }.joinToString("  ·  ")
+                    desc.text = o.str("overview").ifEmpty { "Pas de description." }
+                    Img.load(posterUrl(o), iv)
+                }
+            }
+        }
     }
 
     // ---------- Autre : Prowlarr -> qBittorrent (catégorie « autres ») ----------
