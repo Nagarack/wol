@@ -39,6 +39,7 @@ class MediaTab(private val a: Activity, private val st: Settings) {
         val recents = a.foldable(col, "Ajouts récents", st, "recent", true)
         recentBox.orientation = LinearLayout.VERTICAL
         recents.addView(recentBox)
+        col.addView(a.rowItem("Découvrir", "Suggestions de films populaires (listes Radarr)") { LibraryUi5.discover(a, st) })
         col.addView(a.rowItem("Continuer à regarder", "Reprendre un film ou un épisode commencé") { LibraryUi5.resume(a, st) })
         col.addView(a.rowItem("Télécommande", "Piloter la télévision ou un autre appareil Jellyfin") { RemoteUi.open(a, st) })
         val tools = a.foldable(col, "Outils de bibliothèque", st, "tools", false)

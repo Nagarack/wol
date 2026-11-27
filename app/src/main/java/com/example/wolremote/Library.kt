@@ -19,7 +19,7 @@ object Storage {
     class Disk(val label: String, val free: Long, val total: Long) {
         val freePct: Int get() = if (total > 0) (free * 100 / total).toInt() else 100
     }
-    class Entry(val kind: String, val id: Int, val title: String, val size: Long)
+    class Entry(val kind: String, val id: Int, val title: String, val size: Long) { var jid = "" }
 
     fun disks(st: Settings): List<Disk> {
         val key = st.get("kRadarr").ifEmpty { st.get("kSonarr") }
@@ -289,7 +289,7 @@ object Quality {
 
 // Suivi des séries : prochains épisodes à voir (Jellyfin) + recherche des suivants manquants (Sonarr)
 object Follow {
-    class Next(val series: String, val label: String)
+    class Next(val series: String, val label: String, val id: String)
 
     fun userId(st: Settings): String {
         val r = Jellyfin.get(st, "/Users")
@@ -306,6 +306,12 @@ object Follow {
         return best
     }
 
+    // Marque un élément comme vu (true) ou non vu (false) dans Jellyfin
+    fun mark(st: Settings, itemId: String, played: Boolean): Boolean {
+        val path = "/Users/" + userId(st) + "/PlayedItems/" + itemId
+        return (if (played) Jellyfin.post(st, path) else Jellyfin.delete(st, path)).ok
+    }
+
     fun nextUp(st: Settings): List<Next> {
         val r = Jellyfin.get(st, "/Shows/NextUp?UserId=" + userId(st) + "&Limit=30", 20000)
         if (!r.ok) throw Exception("Jellyfin : HTTP " + r.code)
@@ -313,7 +319,7 @@ object Follow {
         val out = ArrayList<Next>()
         for (i in 0 until a.length()) {
             val o = a.optJSONObject(i) ?: continue
-            out.add(Next(o.str("SeriesName"), "S" + o.optInt("ParentIndexNumber") + "E" + o.optInt("IndexNumber") + " · " + o.str("Name")))
+            out.add(Next(o.str("SeriesName"), "S" + o.optInt("ParentIndexNumber") + "E" + o.optInt("IndexNumber") + " · " + o.str("Name"), o.str("Id")))
         }
         return out
     }
@@ -365,19 +371,34 @@ object LibraryUi2 {
             try {
                 val n = Follow.nextUp(st)
                 a.runOnUiThread {
-                    info.text = if (n.isEmpty()) "Rien en attente : tu es à jour." else "Prochain épisode à voir. Touche une série pour chercher les épisodes manquants."
+                    info.text = if (n.isEmpty()) "Rien en attente : tu es à jour." else "Prochain épisode à voir pour chaque série."
                     for (x in n) {
                         val row = a.card()
                         row.addView(a.tv(x.series, 15f, Pal.FG))
                         val sub = a.tv(x.label, 13f, Pal.MUTED)
                         row.addView(sub)
-                        row.setOnClickListener {
+                        val br = LinearLayout(a)
+                        br.orientation = LinearLayout.HORIZONTAL
+                        val b1 = a.btn2("Chercher la suite", Pal.FG, 44) {
                             sub.text = "Recherche…"
                             thread {
                                 val m = try { Follow.searchMissing(st, x.series) } catch (e: Exception) { e.message ?: "erreur" }
                                 a.runOnUiThread { sub.text = x.label + "\n" + m }
                             }
                         }
+                        val b2 = a.btn2("Marquer vu", Pal.FG, 44) {
+                            thread {
+                                val ok = try { Follow.mark(st, x.id, true) } catch (e: Exception) { false }
+                                a.runOnUiThread { sub.text = x.label + (if (ok) "\nMarqué comme vu" else "\nÉchec") }
+                            }
+                        }
+                        for (b in listOf(b1, b2)) {
+                            val lp = LinearLayout.LayoutParams(0, WRAP, 1f)
+                            lp.topMargin = a.dp(8); lp.leftMargin = a.dp(3); lp.rightMargin = a.dp(3)
+                            b.layoutParams = lp
+                            br.addView(b)
+                        }
+                        row.addView(br)
                         body.addView(row)
                     }
                 }
@@ -447,6 +468,7 @@ object Cleanup {
             val last = o.optJSONObject("UserData")?.str("LastPlayedDate") ?: ""
             if (last.isEmpty() || last >= cutoff) continue
             val e = map[o.str("Name").lowercase() + "|" + o.optInt("ProductionYear")] ?: continue
+            e.jid = o.str("Id")
             out.add(e)
         }
         return out.sortedByDescending { it.size }
@@ -485,7 +507,7 @@ object LibraryUi3 {
             try {
                 val c = Cleanup.candidates(st)
                 a.runOnUiThread {
-                    info.text = if (c.isEmpty()) "Aucun film vu depuis plus de 3 mois." else c.size.toString() + " film(s) vus il y a plus de 3 mois, " + fmtSize(c.sumOf { it.size }) + " à récupérer. Touche pour supprimer."
+                    info.text = if (c.isEmpty()) "Aucun film vu depuis plus de 3 mois." else c.size.toString() + " film(s) vus il y a plus de 3 mois, " + fmtSize(c.sumOf { it.size }) + " à récupérer. Touche pour supprimer, appui long pour marquer non vu."
                     for (e in c) {
                         val row = a.tv(fmtSize(e.size) + "   " + e.title, 14f, Pal.FG)
                         row.setPadding(0, a.dp(10), 0, a.dp(10))
@@ -501,6 +523,16 @@ object LibraryUi3 {
                                         }
                                     }
                                 }.setNegativeButton("Annuler", null).show()
+                        }
+                        row.setOnLongClickListener {
+                            a.dialogBuilder().setMessage("Marquer « " + e.title + " » comme non vu ?")
+                                .setPositiveButton("Oui") { _, _ ->
+                                    thread {
+                                        val ok = try { Follow.mark(st, e.jid, false) } catch (x: Exception) { false }
+                                        a.runOnUiThread { row.text = (if (ok) "Non vu : " else "Échec : ") + e.title; row.setTextColor(Pal.MUTED) }
+                                    }
+                                }.setNegativeButton("Annuler", null).show()
+                            true
                         }
                         body.addView(row)
                     }
@@ -523,7 +555,7 @@ object LibraryUi3 {
                 try {
                     val m = Tonight.pick(st, lo, hi)
                     a.runOnUiThread {
-                        info.text = if (m.isEmpty()) "Aucun film non vu dans cette durée." else "Touche un film pour le lancer sur la télévision."
+                        info.text = if (m.isEmpty()) "Aucun film non vu dans cette durée." else "Touche un film pour le lancer sur la télévision, appui long pour le marquer comme vu."
                         for (x in m) {
                             val row = LinearLayout(a); row.orientation = LinearLayout.HORIZONTAL
                             row.setPadding(0, a.dp(8), 0, a.dp(8))
@@ -538,6 +570,16 @@ object LibraryUi3 {
                             t.addView(a.tv((x.minutes / 60).toString() + " h " + String.format("%02d", x.minutes % 60) + (if (x.rating > 0) "  ·  " + String.format(Locale.FRANCE, "%.1f", x.rating) + "/10" else ""), 13f, Pal.MUTED))
                             row.addView(t, LinearLayout.LayoutParams(0, WRAP, 1f))
                             row.setOnClickListener { RemoteUi.playOn(a, st, x.id, x.title) }
+                            row.setOnLongClickListener {
+                                a.dialogBuilder().setMessage("Marquer « " + x.title + " » comme vu ?")
+                                    .setPositiveButton("Oui") { _, _ ->
+                                        thread {
+                                            val ok = try { Follow.mark(st, x.id, true) } catch (e: Exception) { false }
+                                            a.runOnUiThread { android.widget.Toast.makeText(a, if (ok) "Marqué comme vu" else "Échec", android.widget.Toast.LENGTH_SHORT).show() }
+                                        }
+                                    }.setNegativeButton("Annuler", null).show()
+                                true
+                            }
                             list.addView(row)
                         }
                     }

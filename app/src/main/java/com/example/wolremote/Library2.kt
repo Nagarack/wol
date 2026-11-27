@@ -76,7 +76,67 @@ object Sagas {
     }
 }
 
+object Discover {
+    fun list(st: Settings): List<JSONObject> {
+        val kr = st.get("kRadarr")
+        if (kr.isEmpty()) throw Exception("clé Radarr manquante (Réglages)")
+        val r = Net.call("GET", st.base(7878) + "/api/v3/importlist/movie", kr, timeout = 40000)
+        if (!r.ok) throw Exception("Radarr : HTTP " + r.code)
+        val a = JSONArray(r.body)
+        val out = ArrayList<JSONObject>()
+        for (i in 0 until a.length()) {
+            val o = a.optJSONObject(i) ?: continue
+            if (o.optBoolean("isExisting") || o.optBoolean("isExcluded") || o.optInt("id", 0) > 0) continue
+            out.add(o)
+            if (out.size >= 40) break
+        }
+        return out
+    }
+}
+
 object LibraryUi5 {
+    fun discover(a: Activity, st: Settings) {
+        val body = LinearLayout(a); body.orientation = LinearLayout.VERTICAL
+        val info = a.tv("Chargement…", 14f, Pal.MUTED)
+        body.addView(info)
+        dialog(a, "Découvrir", body)
+        thread {
+            try {
+                val l = Discover.list(st)
+                a.runOnUiThread {
+                    info.text = if (l.isEmpty()) "Aucune suggestion. Dans Radarr, ajoute une liste d'import (Réglages, Listes, par exemple « TMDb Popular »)." else "Touche un film pour l'ajouter et lancer son téléchargement."
+                    for (o in l) {
+                        val row = LinearLayout(a); row.orientation = LinearLayout.HORIZONTAL
+                        row.setPadding(0, a.dp(8), 0, a.dp(8))
+                        val img = ImageView(a)
+                        img.scaleType = ImageView.ScaleType.CENTER_CROP
+                        img.setBackgroundColor(Pal.CARD2)
+                        row.addView(img, LinearLayout.LayoutParams(a.dp(64), a.dp(96)))
+                        Img.load(posterUrl(o), img)
+                        val t = LinearLayout(a); t.orientation = LinearLayout.VERTICAL
+                        t.setPadding(a.dp(12), 0, 0, 0)
+                        val title = o.str("title") + (if (o.optInt("year") > 0) " (" + o.optInt("year") + ")" else "")
+                        t.addView(a.tv(title, 15f, Pal.FG))
+                        val state = a.tv(o.str("overview").take(100) + "…", 12f, Pal.MUTED)
+                        t.addView(state)
+                        row.addView(t, LinearLayout.LayoutParams(0, WRAP, 1f))
+                        row.setOnClickListener {
+                            row.setOnClickListener(null)
+                            state.text = "Ajout…"
+                            thread {
+                                val err = try { Sagas.add(st, o.optInt("tmdbId")) } catch (e: Exception) { e.message ?: "erreur" }
+                                a.runOnUiThread { state.text = if (err == null) "Ajouté, recherche lancée." else "Échec : $err"; state.setTextColor(if (err == null) Pal.GREEN else Pal.RED) }
+                            }
+                        }
+                        body.addView(row)
+                    }
+                }
+            } catch (e: Exception) {
+                a.runOnUiThread { info.text = "Erreur : " + e.message }
+            }
+        }
+    }
+
     private fun dialog(a: Activity, title: String, body: LinearLayout) {
         body.setPadding(a.dp(16), a.dp(8), a.dp(16), a.dp(8))
         val sv = ScrollView(a)
@@ -93,7 +153,7 @@ object LibraryUi5 {
             try {
                 val l = Resume.list(st)
                 a.runOnUiThread {
-                    info.text = if (l.isEmpty()) "Rien en cours." else "Touche un titre pour reprendre sur la télévision."
+                    info.text = if (l.isEmpty()) "Rien en cours." else "Touche un titre pour reprendre sur la télévision, appui long pour le marquer comme vu."
                     for (x in l) {
                         val row = LinearLayout(a); row.orientation = LinearLayout.HORIZONTAL
                         row.setPadding(0, a.dp(8), 0, a.dp(8))
@@ -109,6 +169,16 @@ object LibraryUi5 {
                         t.addView(a.tv("reste " + (if (left >= 60) (left / 60).toString() + " h " + (left % 60) + " min" else "$left min"), 13f, Pal.MUTED))
                         row.addView(t, LinearLayout.LayoutParams(0, WRAP, 1f))
                         row.setOnClickListener { RemoteUi.playOn(a, st, x.id, x.title, x.posTicks) }
+                        row.setOnLongClickListener {
+                            a.dialogBuilder().setMessage("Marquer « " + x.title + " » comme vu ?")
+                                .setPositiveButton("Oui") { _, _ ->
+                                    thread {
+                                        val ok = try { Follow.mark(st, x.id, true) } catch (e: Exception) { false }
+                                        a.runOnUiThread { row.visibility = if (ok) android.view.View.GONE else android.view.View.VISIBLE }
+                                    }
+                                }.setNegativeButton("Annuler", null).show()
+                            true
+                        }
                         body.addView(row)
                     }
                 }

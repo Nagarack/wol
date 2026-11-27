@@ -8,6 +8,12 @@ object Jellyfin {
         return Net.call("GET", st.base(8096) + path, timeout = timeout, headers = hd)
     }
 
+    fun delete(st: Settings, path: String): Resp {
+        val key = st.get("kJellyfin").trim()
+        val hd = mapOf("Authorization" to "MediaBrowser Token=\"$key\"", "X-Emby-Token" to key)
+        return Net.call("DELETE", st.base(8096) + path, timeout = 15000, headers = hd)
+    }
+
     fun post(st: Settings, path: String): Resp {
         val key = st.get("kJellyfin").trim()
         val hd = mapOf("Authorization" to "MediaBrowser Token=\"$key\"", "X-Emby-Token" to key)

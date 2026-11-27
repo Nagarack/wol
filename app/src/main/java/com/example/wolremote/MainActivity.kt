@@ -27,6 +27,7 @@ class MainActivity : Activity() {
     private lateinit var bWake: Button
     private lateinit var bOff: Button
     private lateinit var bRestart: Button
+    private lateinit var bScreens: Button
     private lateinit var bStart: Button
     private lateinit var bStop: Button
     private lateinit var queue: QueueTab
@@ -238,6 +239,8 @@ class MainActivity : Activity() {
                 .setNegativeButton("Annuler", null).show()
         }
         col.addView(bRestart)
+        bScreens = btn2("Éteindre les écrans", Pal.FG, 56) { act("/screens/off") }
+        col.addView(bScreens)
 
         col.addView(section("Chroniques"))
         bStart = btn2("Lancer", Pal.FG, 72) { act("/game/start") }
@@ -279,6 +282,7 @@ class MainActivity : Activity() {
                     avail(bWake, !online)
                     avail(bOff, online)
                     avail(bRestart, online)
+                    avail(bScreens, online)
                     avail(bStart, online && !running)
                     avail(bStop, running)
                 }
@@ -289,7 +293,7 @@ class MainActivity : Activity() {
                     status.setTextColor(Pal.MUTED)
                     game.text = "Chroniques …"
                     game.setTextColor(Pal.MUTED)
-                    for (b in listOf(bWake, bOff, bRestart, bStart, bStop)) avail(b, true)
+                    for (b in listOf(bWake, bOff, bRestart, bScreens, bStart, bStop)) avail(b, true)
                 }
             }
         }
