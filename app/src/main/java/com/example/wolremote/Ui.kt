@@ -132,6 +132,27 @@ fun Activity.rowItem(label: String, sub: String = "", marker: String = "›", on
     return r
 }
 
+// Rubrique repliable ; l'état (ouvert / fermé) est mémorisé
+fun Activity.foldable(col: LinearLayout, title: String, st: Settings, key: String, openDefault: Boolean): LinearLayout {
+    val body = LinearLayout(this)
+    body.orientation = LinearLayout.VERTICAL
+    val saved = st.get("fold_$key")
+    val open0 = if (saved.isEmpty()) openDefault else saved == "1"
+    body.visibility = if (open0) android.view.View.VISIBLE else android.view.View.GONE
+    val head = rowItem(title, "", if (open0) "−" else "+") {}
+    (head.layoutParams as LinearLayout.LayoutParams).topMargin = dp(16)
+    val mark = head.getChildAt(1) as TextView
+    head.setOnClickListener {
+        val open = body.visibility == android.view.View.GONE
+        body.visibility = if (open) android.view.View.VISIBLE else android.view.View.GONE
+        mark.text = if (open) "−" else "+"
+        st.put("fold_$key", if (open) "1" else "0")
+    }
+    col.addView(head)
+    col.addView(body)
+    return body
+}
+
 // Bouton secondaire : contour discret, pas de remplissage (un seul bouton plein par écran)
 fun Activity.btn2(label: String, textColor: Int = Pal.FG, h: Int = 52, onClick: () -> Unit): Button {
     val b = btn(label, Pal.CARD, h, onClick)
