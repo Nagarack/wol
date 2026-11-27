@@ -62,6 +62,11 @@ object Sagas {
         val key = st.get("kRadarr")
         val lk = Net.call("GET", "$base/api/v3/movie/lookup/tmdb?tmdbId=$tmdb", key, timeout = 30000)
         if (!lk.ok) return "introuvable (" + lk.code + ")"
+        val known = JSONObject(lk.body).optInt("id", 0)
+        if (known > 0) {   // déjà suivi dans Radarr : on lance simplement la recherche
+            val c = Net.call("POST", "$base/api/v3/command", key, JSONObject().put("name", "MoviesSearch").put("movieIds", JSONArray().put(known)).toString(), 30000)
+            return if (c.ok) null else "refusé (" + c.code + ")"
+        }
         val pref = st.get("pRadarr").trim().toIntOrNull()
         val prof = pref ?: JSONArray(Net.call("GET", "$base/api/v3/qualityprofile", key).body).optJSONObject(0)?.optInt("id") ?: return "aucun profil de qualité"
         val body = JSONObject(lk.body)
@@ -255,14 +260,23 @@ object Tmdb {
         val kind = if (tv) "tv" else "movie"
         val ep = (if (tv) TV else MOVIE).firstOrNull { it.first == label }?.second ?: "popular"
         val key = st.get("kTmdb").trim()
-        val have = HashSet<Int>()
+        val have = HashSet<Int>()      // déjà téléchargés : masqués
+        val tracked = HashSet<Int>()   // suivis mais sans fichier : proposés
         val k2 = st.get(if (tv) "kSonarr" else "kRadarr")
         if (k2.isNotEmpty()) {
             val r = Net.call("GET", st.base(if (tv) 8989 else 7878) + "/api/v3/" + (if (tv) "series" else "movie"), k2, timeout = 20000)
-            if (r.ok) { val a = JSONArray(r.body); for (i in 0 until a.length()) have.add(a.optJSONObject(i)?.optInt("tmdbId") ?: 0) }
+            if (r.ok) {
+                val a = JSONArray(r.body)
+                for (i in 0 until a.length()) {
+                    val o = a.optJSONObject(i) ?: continue
+                    val id = o.optInt("tmdbId")
+                    if (!tv && !o.optBoolean("hasFile")) tracked.add(id) else have.add(id)
+                }
+            }
         }
         val out = ArrayList<JSONObject>()
-        for (page in 1..2) {
+        var hidden = 0
+        for (page in 1..4) {
             val r = Net.call("GET", "https://api.themoviedb.org/3/$kind/$ep?api_key=$key&language=fr-FR&region=FR&page=$page", timeout = 15000)
             if (r.code == 401) throw Exception("clé TMDb refusée")
             if (!r.ok) throw Exception("TMDb : HTTP " + r.code)
@@ -270,17 +284,19 @@ object Tmdb {
             for (i in 0 until a.length()) {
                 val o = a.optJSONObject(i) ?: continue
                 val id = o.optInt("id")
-                if (have.contains(id)) continue
+                if (have.contains(id)) { hidden++; continue }
                 val date = o.str(if (tv) "first_air_date" else "release_date")
                 val p = o.str("poster_path")
                 out.add(JSONObject().put("title", o.str(if (tv) "name" else "title")).put("year", date.take(4).toIntOrNull() ?: 0)
                     .put("overview", o.str("overview")).put("remotePoster", if (p.isEmpty()) "" else "https://image.tmdb.org/t/p/w185$p")
                     .put("tmdbId", id).put("tv", tv)
-                    .put("sub", if (o.optDouble("vote_average", 0.0) > 0) String.format(java.util.Locale.FRANCE, "Note %.1f / 10", o.optDouble("vote_average")) else ""))
+                    .put("sub", listOf(if (o.optDouble("vote_average", 0.0) > 0) String.format(java.util.Locale.FRANCE, "Note %.1f / 10", o.optDouble("vote_average")) else "", if (tracked.contains(id)) "Suivi, pas téléchargé" else "").filter { it.isNotEmpty() }.joinToString(" · ")))
             }
         }
-        return out.take(40)
+        lastHidden = hidden
+        return out.take(60)
     }
+    var lastHidden = 0
 
     // Série : TMDb → identifiant TVDB → ajout dans Sonarr
     fun addTv(st: Settings, tmdb: Int): String? {
@@ -327,7 +343,7 @@ object LibraryUi5 {
 
         fun show(l: List<JSONObject>) {
             list.removeAllViews()
-            info.text = if (l.isEmpty()) "Rien pour l'instant. " + (if (mode == "films" && !Tmdb.has(st)) Discover.lastInfo else "Réessaie dans une minute.") else "Touche un titre pour l'ajouter et lancer son téléchargement." + (if (mode == "films" && !Tmdb.has(st)) "\n\n" + Discover.lastInfo else "")
+            info.text = if (l.isEmpty()) "Rien pour l'instant. " + (if (mode == "films" && !Tmdb.has(st)) Discover.lastInfo else "Réessaie dans une minute.") else "Touche un titre pour l'ajouter et lancer son téléchargement." + (if (Tmdb.has(st)) (if (Tmdb.lastHidden > 0) "\n" + Tmdb.lastHidden + " déjà dans ta bibliothèque, masqué(s)." else "") else if (mode == "films") "\n\n" + Discover.lastInfo else "")
             for (o in l) {
                 val isShow = o.has("tvdbId")
                 val row = LinearLayout(a); row.orientation = LinearLayout.HORIZONTAL
