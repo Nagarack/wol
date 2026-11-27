@@ -262,10 +262,40 @@ object Tmdb {
     val TV = listOf("Populaires" to "popular", "À l'antenne" to "on_the_air", "Aujourd'hui" to "airing_today", "Mieux notées" to "top_rated")
     fun has(st: Settings) = st.get("kTmdb").trim().isNotEmpty()
 
+    private val GM = listOf("Action" to 28, "Science-fiction" to 878, "Comédie" to 35, "Horreur" to 27, "Thriller" to 53, "Animation" to 16,
+        "Drame" to 18, "Aventure" to 12, "Fantastique" to 14, "Policier" to 80, "Romance" to 10749, "Famille" to 10751)
+    private val GT = listOf("Action & aventure" to 10759, "Science-fiction" to 10765, "Comédie" to 35, "Drame" to 18, "Crime" to 80,
+        "Animation" to 16, "Mystère" to 9648, "Documentaire" to 99)
+    fun kinds(tv: Boolean): List<String> = (if (tv) TV else MOVIE).map { it.first } + listOf("Pour toi") + (if (tv) GT else GM).map { it.first }
+
+    private fun api(st: Settings, path: String): JSONArray {
+        val sep = if (path.contains("?")) "&" else "?"
+        val r = Net.call("GET", "https://api.themoviedb.org/3$path${sep}api_key=" + st.get("kTmdb").trim() + "&language=fr-FR&region=FR", timeout = 15000)
+        if (r.code == 401) throw Exception("clé TMDb refusée")
+        if (!r.ok) throw Exception("TMDb : HTTP " + r.code)
+        return JSONObject(r.body).optJSONArray("results") ?: JSONArray()
+    }
+
+    // Titres vus dans Jellyfin (récents d'abord) avec leur identifiant TMDb
+    private fun watched(st: Settings, tv: Boolean): List<Pair<Int, String>> {
+        val uid = Follow.userId(st)
+        val r = Jellyfin.get(st, "/Users/$uid/Items?IncludeItemTypes=" + (if (tv) "Series" else "Movie") + "&Recursive=true" + (if (tv) "" else "&IsPlayed=true") +
+            "&SortBy=DatePlayed&SortOrder=Descending&Limit=" + (if (tv) 30 else 12) + "&Fields=ProviderIds", 30000)
+        if (!r.ok) throw Exception("Jellyfin : HTTP " + r.code)
+        val a = JSONObject(r.body).optJSONArray("Items") ?: JSONArray()
+        val out = ArrayList<Pair<Int, String>>()
+        for (i in 0 until a.length()) {
+            val o = a.optJSONObject(i) ?: continue
+            if (tv && o.optJSONObject("UserData")?.str("LastPlayedDate").isNullOrEmpty()) continue
+            val id = o.optJSONObject("ProviderIds")?.str("Tmdb")?.toIntOrNull() ?: continue
+            out.add(id to o.str("Name"))
+            if (out.size >= 8) break
+        }
+        return out
+    }
+
     fun list(st: Settings, tv: Boolean, label: String): List<JSONObject> {
         val kind = if (tv) "tv" else "movie"
-        val ep = (if (tv) TV else MOVIE).firstOrNull { it.first == label }?.second ?: "popular"
-        val key = st.get("kTmdb").trim()
         val have = HashSet<Int>()      // déjà téléchargés : masqués
         val tracked = HashSet<Int>()   // suivis mais sans fichier : proposés
         val k2 = st.get(if (tv) "kSonarr" else "kRadarr")
@@ -280,24 +310,47 @@ object Tmdb {
                 }
             }
         }
+        val raw = ArrayList<JSONObject>()
+        val why = HashMap<Int, String>()
+        val genre = (if (tv) GT else GM).firstOrNull { it.first == label }?.second
+        if (label == "Pour toi") {
+            val seeds = watched(st, tv)
+            if (seeds.isEmpty()) throw Exception("aucun titre vu trouvé dans Jellyfin (clé et utilisateur Jellyfin ?)")
+            val score = HashMap<Int, Double>()
+            val byId = HashMap<Int, JSONObject>()
+            val seedIds = seeds.map { it.first }.toSet()
+            for ((sid, name) in seeds) {
+                val a = try { api(st, "/$kind/$sid/recommendations") } catch (e: Exception) { if (e.message?.contains("refusée") == true) throw e else continue }
+                for (i in 0 until a.length()) {
+                    val o = a.optJSONObject(i) ?: continue
+                    val id = o.optInt("id")
+                    if (seedIds.contains(id)) continue
+                    score[id] = (score[id] ?: 0.0) + 1.0 + o.optDouble("vote_average", 0.0) / 20.0
+                    if (!byId.containsKey(id)) { byId[id] = o; why[id] = name }
+                }
+            }
+            for (id in score.keys.sortedByDescending { score[it] }) raw.add(byId[id]!!)
+        } else {
+            val ep = (if (tv) TV else MOVIE).firstOrNull { it.first == label }?.second ?: "popular"
+            for (page in 1..4) {
+                val path = if (genre != null) "/discover/$kind?with_genres=$genre&sort_by=popularity.desc&include_adult=false&vote_count.gte=" + (if (tv) 50 else 150) + "&page=$page"
+                    else "/$kind/$ep?page=$page"
+                val a = api(st, path)
+                for (i in 0 until a.length()) a.optJSONObject(i)?.let { raw.add(it) }
+            }
+        }
         val out = ArrayList<JSONObject>()
         var hidden = 0
-        for (page in 1..4) {
-            val r = Net.call("GET", "https://api.themoviedb.org/3/$kind/$ep?api_key=$key&language=fr-FR&region=FR&page=$page", timeout = 15000)
-            if (r.code == 401) throw Exception("clé TMDb refusée")
-            if (!r.ok) throw Exception("TMDb : HTTP " + r.code)
-            val a = JSONObject(r.body).optJSONArray("results") ?: break
-            for (i in 0 until a.length()) {
-                val o = a.optJSONObject(i) ?: continue
-                val id = o.optInt("id")
-                if (have.contains(id)) { hidden++; continue }
-                val date = o.str(if (tv) "first_air_date" else "release_date")
-                val p = o.str("poster_path")
-                out.add(JSONObject().put("title", o.str(if (tv) "name" else "title")).put("year", date.take(4).toIntOrNull() ?: 0)
-                    .put("overview", o.str("overview")).put("remotePoster", if (p.isEmpty()) "" else "https://image.tmdb.org/t/p/w185$p")
-                    .put("tmdbId", id).put("tv", tv)
-                    .put("sub", listOf(if (o.optDouble("vote_average", 0.0) > 0) String.format(java.util.Locale.FRANCE, "Note %.1f / 10", o.optDouble("vote_average")) else "", if (tracked.contains(id)) "Suivi, pas téléchargé" else "").filter { it.isNotEmpty() }.joinToString(" · ")))
-            }
+        for (o in raw) {
+            val id = o.optInt("id")
+            if (have.contains(id)) { hidden++; continue }
+            val date = o.str(if (tv) "first_air_date" else "release_date")
+            val p = o.str("poster_path")
+            val note = if (o.optDouble("vote_average", 0.0) > 0) String.format(java.util.Locale.FRANCE, "Note %.1f / 10", o.optDouble("vote_average")) else ""
+            out.add(JSONObject().put("title", o.str(if (tv) "name" else "title")).put("year", date.take(4).toIntOrNull() ?: 0)
+                .put("overview", o.str("overview")).put("remotePoster", if (p.isEmpty()) "" else "https://image.tmdb.org/t/p/w185$p")
+                .put("tmdbId", id).put("tv", tv)
+                .put("sub", listOf(note, if (tracked.contains(id)) "Suivi, pas téléchargé" else "", if (why.containsKey(id)) "Comme « " + why[id] + " »" else "").filter { it.isNotEmpty() }.joinToString(" · ")))
         }
         lastHidden = hidden
         return out.take(60)
@@ -333,7 +386,7 @@ object LibraryUi5 {
         dialog(a, "Découvrir", body)
         var mode = "films"
         var cur = Discover.KINDS[0].first
-        fun kinds(): List<String> = if (Tmdb.has(st)) (if (mode == "films") Tmdb.MOVIE else Tmdb.TV).map { it.first } else if (mode == "films") Discover.KINDS.map { it.first } else Shows.KINDS
+        fun kinds(): List<String> = if (Tmdb.has(st)) Tmdb.kinds(mode != "films") else if (mode == "films") Discover.KINDS.map { it.first } else Shows.KINDS
 
         fun chip(label: String, sel: Boolean, click: () -> Unit): android.widget.TextView {
             val t = a.tv(label, 14f, if (sel) android.graphics.Color.WHITE else Pal.MUTED)
