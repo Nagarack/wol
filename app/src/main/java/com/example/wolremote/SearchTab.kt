@@ -145,22 +145,46 @@ class SearchTab(private val a: Activity, private val st: Settings) {
                     val o = arr.optJSONObject(i) ?: continue
                     list.add(Rel.from(o))
                 }
-                ui { all = list; filter = ""; setStatus(list.size.toString() + " résultat(s)"); render() }
+                ui { all = list; filter = ""; render() }
             } catch (e: Exception) {
                 ui { setStatus("Erreur de recherche : " + e.message) }
             }
         }
     }
 
+    private fun videoOnly(): Boolean = st.get("videoOnly") != "0"
+
     private fun render() {
         chips.removeAllViews()
         results.removeAllViews()
-        val names = all.map { it.indexer }.distinct().sorted()
-        addChip("Tous (" + all.size + ")", "")
-        for (n in names) addChip(n + " (" + all.count { it.indexer == n } + ")", n)
-        val shown = all.filter { filter.isEmpty() || it.indexer == filter }
+        val vo = videoOnly()
+        val vis = all.filter { !vo || it.isVideo() }
+        val hidden = all.size - vis.size
+        setStatus(vis.size.toString() + " résultat(s)" + (if (hidden > 0) " · $hidden masqué(s) (jeux, musique, logiciels…)" else ""))
+        addToggleChip("🎬 Films / séries / animés seulement", vo)
+        val names = vis.map { it.indexer }.distinct().sorted()
+        addChip("Tous (" + vis.size + ")", "")
+        for (n in names) addChip(n + " (" + vis.count { it.indexer == n } + ")", n)
+        val shown = vis.filter { filter.isEmpty() || it.indexer == filter }
             .sortedByDescending { it.seeders }.take(100)
         for (r in shown) results.addView(card(r))
+    }
+
+    private fun addToggleChip(label: String, on: Boolean) {
+        val t = a.tv(if (on) "✓ $label" else label, 14f, Color.WHITE)
+        t.setPadding(a.dp(14), a.dp(8), a.dp(14), a.dp(8))
+        val bg = GradientDrawable()
+        bg.setColor(if (on) Pal.GREEN else Pal.GRAY)
+        bg.cornerRadius = a.dp(20).toFloat()
+        t.background = bg
+        t.setOnClickListener {
+            st.put("videoOnly", if (on) "0" else "1")
+            filter = ""
+            render()
+        }
+        val lp = LinearLayout.LayoutParams(WRAP, WRAP)
+        lp.rightMargin = a.dp(8)
+        chips.addView(t, lp)
     }
 
     private fun addChip(label: String, value: String) {

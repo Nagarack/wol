@@ -97,14 +97,39 @@ class Settings(ctx: Context) {
 
 class Rel(
     val guid: String, val indexerId: Int, val indexer: String, val title: String,
-    val size: Long, val seeders: Int, val date: String, val downloadUrl: String, val magnetUrl: String
+    val size: Long, val seeders: Int, val date: String, val downloadUrl: String, val magnetUrl: String,
+    val cats: List<Pair<Int, String>>
 ) {
+    // Vrai pour films, séries, animés (et documentaires). Faux pour jeux, musique, logiciels, livres, adulte…
+    fun isVideo(): Boolean {
+        if (cats.isEmpty()) return true   // catégorie inconnue : on garde
+        for (c in cats) {
+            val n = c.second.lowercase()
+            if (c.first in 6000..6999 || n.contains("xxx") || n.contains("adult") || n.contains("porn")) continue
+            if (c.first in 2000..2999 || c.first in 5000..5999) return true
+            if (n.contains("movie") || n.contains("film") || n.contains("tv") || n.contains("séri") ||
+                n.contains("serie") || n.contains("anim") || n.contains("video") || n.contains("vidéo") ||
+                n.contains("doc")) return true
+        }
+        return false
+    }
+
     companion object {
-        fun from(o: JSONObject): Rel = Rel(
-            o.str("guid"), o.optInt("indexerId", 0), o.str("indexer"), o.str("title"),
-            o.optLong("size", 0L), o.optInt("seeders", 0), o.str("publishDate"),
-            o.str("downloadUrl"), o.str("magnetUrl")
-        )
+        fun from(o: JSONObject): Rel {
+            val cl = ArrayList<Pair<Int, String>>()
+            val ca = o.optJSONArray("categories")
+            if (ca != null) {
+                for (i in 0 until ca.length()) {
+                    val c = ca.optJSONObject(i) ?: continue
+                    cl.add(Pair(c.optInt("id", 0), c.str("name")))
+                }
+            }
+            return Rel(
+                o.str("guid"), o.optInt("indexerId", 0), o.str("indexer"), o.str("title"),
+                o.optLong("size", 0L), o.optInt("seeders", 0), o.str("publishDate"),
+                o.str("downloadUrl"), o.str("magnetUrl"), cl
+            )
+        }
     }
 }
 
