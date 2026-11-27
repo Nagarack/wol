@@ -58,13 +58,13 @@ class MainActivity : Activity() {
         })
         status = TextView(this).apply {
             text = "Vérification…"; textSize = 16f; gravity = Gravity.CENTER
-            setPadding(0, px(6), 0, px(24))
+            setPadding(0, px(6), 0, px(4))
         }
         root.addView(status)
         game = TextView(this).apply {
-            text = "Chroniques : …"; textSize = 15f; gravity = Gravity.CENTER
-            setTextColor(Color.parseColor(if (dark) "#A78BFA" else "#7C3AED"))
-            setPadding(0, 0, 0, px(14))
+            text = "● Chroniques …"; textSize = 16f; gravity = Gravity.CENTER
+            setTextColor(Color.GRAY)
+            setPadding(0, 0, 0, px(24))
         }
         root.addView(game)
 
@@ -157,11 +157,16 @@ class MainActivity : Activity() {
                     status.setTextColor(Color.parseColor(if (online) "#16A34A" else "#DC2626"))
                 }
                 val running = try { request("/game/status", false).getBoolean("running") } catch (e: Exception) { false }
-                runOnUiThread { game.text = if (running) "Chroniques : en cours" else "Chroniques : arrêté" }
+                runOnUiThread {
+                    game.text = if (running) "● Chroniques allumé" else "● Chroniques éteint"
+                    game.setTextColor(Color.parseColor(if (running) "#16A34A" else "#DC2626"))
+                }
             } catch (e: Exception) {
                 runOnUiThread {
                     status.text = "Serveur injoignable"
                     status.setTextColor(Color.GRAY)
+                    game.text = "● Chroniques …"
+                    game.setTextColor(Color.GRAY)
                 }
             }
         }
