@@ -363,7 +363,9 @@ class SearchTab(private val a: Activity, private val st: Settings) {
         val series = Regex("s\\d{1,2}e\\d{1,3}|\\bs\\d{2}\\b|saison|season|épisode|episode", RegexOption.IGNORE_CASE).containsMatchIn(r.title)
         val tvCat = r.cats.any { it.first in 5000..5999 }
         val movCat = r.cats.any { it.first in 2000..2999 }
-        return if (kind == "movie") !series && !(tvCat && !movCat) else (series || tvCat || r.cats.isEmpty())
+        val anime = r.cats.any { it.first == 5070 || it.second.contains("anime", true) } ||
+            Regex("^\\s*[\\[(][^\\])]{2,30}[\\])]|\\banime\\b|\\bbatch\\b|\\bOVA\\b|multi-?subs?|\\bepisodes?\\b|\\s-\\s\\d{1,3}(v\\d)?\\s|\\bS\\d{1,2}\\b|\\b(HorribleSubs|SubsPlease|Erai-raws|Judas|ToonsHub|EMBER|Anime Time|DKB)\\b", RegexOption.IGNORE_CASE).containsMatchIn(r.title)
+        return if (kind == "movie") !series && !anime && !(tvCat && !movCat) else (series || tvCat || r.cats.isEmpty())
     }
 
     private fun videoOnly(): Boolean = st.get("videoOnly") != "0"

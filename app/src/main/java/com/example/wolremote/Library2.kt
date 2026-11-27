@@ -136,17 +136,23 @@ object Discover {
         val r = get(st, "/api/v3/importlist/movie", 60000)
         if (!r.ok) throw Exception("Radarr : HTTP " + r.code)
         val a = JSONArray(r.body)
-        val fresh = ArrayList<JSONObject>()
+        var nEx = 0; var nExcl = 0; var nId = 0
+        val all = ArrayList<JSONObject>()
         for (i in 0 until a.length()) {
             val o = a.optJSONObject(i) ?: continue
-            if (o.optBoolean("isExisting") || o.optBoolean("isExcluded") || o.optInt("id", 0) > 0) continue
-            fresh.add(o)
+            all.add(o)
+            if (o.optBoolean("isExisting")) nEx++
+            if (o.optBoolean("isExcluded")) nExcl++
+            if (o.optInt("id", 0) > 0) nId++
         }
+        var fresh = all.filter { !it.optBoolean("isExisting") && !it.optBoolean("isExcluded") && it.optInt("id", 0) == 0 }
+        if (fresh.isEmpty()) fresh = all.filter { !it.optBoolean("isExisting") && !it.optBoolean("isExcluded") }
+        if (fresh.isEmpty()) fresh = all.filter { !it.optBoolean("isExisting") }
         val ofList = if (id < 0) fresh else fresh.filter { o ->
             val ls = o.optJSONArray("lists")
             ls == null || (0 until ls.length()).any { ls.optInt(it) == id }
         }
-        lastInfo = "Radarr a renvoyé " + a.length() + " suggestion(s), " + fresh.size + " nouvelle(s), " + ofList.size + " dans cette liste. La synchronisation peut prendre quelques minutes ; sinon, utilise une clé TMDb (Réglages, Clés API)."
+        lastInfo = "Radarr a renvoyé " + a.length() + " suggestion(s) (" + nEx + " déjà dans ta bibliothèque, " + nExcl + " exclues, " + nId + " avec identifiant), " + fresh.size + " nouvelle(s), " + ofList.size + " dans cette liste. La synchronisation peut prendre quelques minutes ; sinon, utilise une clé TMDb (Réglages, Clés API)."
         return (if (ofList.isEmpty()) fresh else ofList).take(40)
     }
 }
