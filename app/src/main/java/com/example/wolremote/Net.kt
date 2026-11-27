@@ -142,6 +142,13 @@ class Rel(
         }
     }
 
+    // Année présente dans le titre (la dernière, ex. « Blade Runner 2049 2017 » donne 2017)
+    fun year(): Int {
+        val m = Regex("(?<![0-9])(19|20)[0-9]{2}(?![0-9])").findAll(title).lastOrNull() ?: return 0
+        val y = m.value.toInt()
+        return if (y <= java.time.LocalDate.now().year + 1) y else 0
+    }
+
     fun lang(): String {
         val t = title.lowercase()
         return when {

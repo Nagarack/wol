@@ -31,6 +31,8 @@ class SearchTab(private val a: Activity, private val st: Settings) {
     private var filter = ""
     private var kind = st.get("sKind")        // "" = tout, "movie", "tv"
     private var lastQuery = ""
+    private var fY = 0      // année dans le titre (0 = toutes)
+    private var fP = 0      // publiés depuis N jours (0 = toujours)
     private val dups = HashMap<String, Int>() // guid -> nombre d'indexeurs proposant la même release
     // Bibliothèque (Radarr / Sonarr) pour repérer ce qu'on a déjà ; sélection multiple
     private var libMovies: List<Pair<String, Int>> = emptyList()   // titre normalisé, année
@@ -364,6 +366,7 @@ class SearchTab(private val a: Activity, private val st: Settings) {
         val q = query.text.toString().trim()
         if (q.isEmpty()) { setStatus("Saisis une recherche."); return }
         lastQuery = q
+        fY = 0; fP = 0
         addHistory(q)
         val key = st.get("kProwlarr")
         if (key.isEmpty()) { setStatus("Renseigne la clé API de Prowlarr dans Réglages."); return }
@@ -407,7 +410,7 @@ class SearchTab(private val a: Activity, private val st: Settings) {
         val hidden = all.size - vis0.size
         setStatus(vis.size.toString() + " résultat(s)" + (if (hidden > 0) " · $hidden masqué(s) (jeux, musique, logiciels…)" else "") +
             (if (offTopic > 0) " · $offTopic hors sujet" else ""))
-        val nf = listOf(fQ.isNotEmpty(), fL.isNotEmpty(), fS != 0, fSort != "seeders").count { it }
+        val nf = listOf(fQ.isNotEmpty(), fL.isNotEmpty(), fS != 0, fSort != "seeders", fY != 0, fP != 0).count { it }
         val fc = a.tv(if (nf > 0) "Filtres ($nf)" else "Filtres", 14f, Color.WHITE)
         fc.setPadding(a.dp(14), a.dp(8), a.dp(14), a.dp(8))
         fc.background = a.rounded(if (nf > 0) Pal.BLUE else Pal.GRAY, 20)
@@ -430,6 +433,8 @@ class SearchTab(private val a: Activity, private val st: Settings) {
             .filter { fQ.isEmpty() || it.quality() == fQ }
             .filter { fL.isEmpty() || (fL == "vf" && (it.lang() == "VF" || it.lang() == "MULTI")) || (fL == "vostfr" && it.lang() == "VOSTFR") }
             .filter { fS == 0 || it.size <= fS * 1000000000L }
+            .filter { fY == 0 || it.year() == fY }
+            .filter { fP == 0 || it.date.take(10) >= java.time.LocalDate.now().minusDays(fP.toLong()).toString() }
             .let { l ->
                 // une même release proposée par plusieurs indexeurs n'est affichée qu'une fois
                 dups.clear()
@@ -472,6 +477,9 @@ class SearchTab(private val a: Activity, private val st: Settings) {
             }
             group("Qualité", listOf("Toutes" to "", "4K" to "4K", "1080p" to "1080p", "720p" to "720p", "SD" to "SD"), fQ) { fQ = it; st.put("sQ", it) }
             group("Langue", listOf("Toutes" to "", "VF / Multi" to "vf", "VOSTFR" to "vostfr"), fL) { fL = it; st.put("sL", it) }
+            val years = all.map { it.year() }.filter { it > 0 }.groupingBy { it }.eachCount().entries.sortedByDescending { it.key }.take(7)
+            group("Année dans le titre", listOf("Toutes" to "0") + years.map { (it.key.toString() + " (" + it.value + ")") to it.key.toString() }, fY.toString()) { fY = it.toInt() }
+            group("Publié depuis", listOf("Toujours" to "0", "24 h" to "1", "7 jours" to "7", "30 jours" to "30", "1 an" to "365"), fP.toString()) { fP = it.toInt() }
             group("Taille maximale", listOf("Sans limite" to "0", "5 Go" to "5", "15 Go" to "15", "40 Go" to "40"), fS.toString()) { fS = it.toInt(); st.put("sS", it) }
             group("Trier par", listOf("Seeders" to "seeders", "Plus petit" to "size", "Plus récent" to "date"), fSort) { fSort = it; st.put("sSort", it) }
         }
@@ -480,7 +488,7 @@ class SearchTab(private val a: Activity, private val st: Settings) {
         sv.addView(body)
         a.dialogBuilder().setTitle("Filtres").setView(sv)
             .setNeutralButton("Réinitialiser") { _, _ ->
-                fQ = ""; fL = ""; fS = 0; fSort = "seeders"
+                fQ = ""; fL = ""; fS = 0; fSort = "seeders"; fY = 0; fP = 0
                 st.put("sQ", ""); st.put("sL", ""); st.put("sS", "0"); st.put("sSort", "seeders")
                 render()
             }
