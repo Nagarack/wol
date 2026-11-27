@@ -92,6 +92,21 @@ class Settings(ctx: Context) {
         return false
     }
 
+    // Teste si un port répond sur le PC (réseau local puis Tailscale) ; retient l'hôte qui répond.
+    fun reach(port: Int): Boolean {
+        for (h in hosts()) {
+            try {
+                val s = java.net.Socket()
+                s.connect(java.net.InetSocketAddress(h, port), 2500)
+                s.close()
+                active = h
+                return true
+            } catch (e: Exception) {
+            }
+        }
+        return false
+    }
+
     fun ping(port: Int): Boolean = Net.pingHost(if (active.isNotEmpty()) active else (hosts().firstOrNull() ?: ""), port)
 }
 

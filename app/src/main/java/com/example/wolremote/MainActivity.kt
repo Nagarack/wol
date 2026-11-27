@@ -21,6 +21,7 @@ class MainActivity : Activity() {
     private lateinit var game: TextView
     private lateinit var msg: TextView
     private lateinit var queue: QueueTab
+    private lateinit var qb: QbTab
     private lateinit var views: List<View>
     private lateinit var navs: List<TextView>
     private var current = 0
@@ -30,6 +31,7 @@ class MainActivity : Activity() {
         override fun run() {
             if (current == 0) refreshPc()
             if (current == 2) queue.refresh()
+            if (current == 3) qb.refresh()
             handler.postDelayed(this, 4000)
         }
     }
@@ -43,8 +45,10 @@ class MainActivity : Activity() {
 
         val search = SearchTab(this, st)
         queue = QueueTab(this, st)
+        qb = QbTab(this, st)
+        val links = LinksTab(this, st)
         val settings = SettingsTab(this, st)
-        views = listOf(buildPcTab(), search.view, queue.view, settings.view)
+        views = listOf(buildPcTab(), search.view, queue.view, qb.view, links.view, settings.view)
 
         val frame = FrameLayout(this)
         for (v in views) frame.addView(v, FrameLayout.LayoutParams(MATCH, MATCH))
@@ -52,10 +56,10 @@ class MainActivity : Activity() {
         val nav = LinearLayout(this)
         nav.orientation = LinearLayout.HORIZONTAL
         nav.setBackgroundColor(Pal.CARD)
-        val labels = listOf("⏻\nPC", "🔎\nRecherche", "⬇\nEn cours", "⚙\nRéglages")
+        val labels = listOf("⏻\nPC", "🔎\nRecherche", "⬇\nEn cours", "📦\nqBit", "🔗\nLiens", "⚙\nRéglages")
         val list = ArrayList<TextView>()
         for ((i, l) in labels.withIndex()) {
-            val t = tv(l, 13f, Pal.MUTED)
+            val t = tv(l, 11f, Pal.MUTED)
             t.gravity = Gravity.CENTER
             t.setPadding(0, dp(10), 0, dp(10))
             t.setOnClickListener { show(i) }
@@ -82,6 +86,7 @@ class MainActivity : Activity() {
         for ((k, t) in navs.withIndex()) t.setTextColor(if (k == i) Color.WHITE else Pal.MUTED)
         if (i == 0) refreshPc()
         if (i == 2) queue.refresh()
+        if (i == 3) qb.refresh()
     }
 
     // ---------- Onglet PC (Wake-on-LAN inchangé + Chroniques) ----------

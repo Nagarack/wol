@@ -40,6 +40,8 @@ class SettingsTab(private val a: Activity, private val st: Settings) {
         add("Clé API Sonarr", "kSonarr", pw)
         add("Profil de qualité Radarr (ID, vide = le premier)", "pRadarr", num)
         add("Profil de qualité Sonarr (ID, vide = le premier)", "pSonarr", num)
+        add("qBittorrent : utilisateur", "kQbUser", InputType.TYPE_CLASS_TEXT)
+        add("qBittorrent : mot de passe", "kQbPass", pw)
 
         col.addView(a.btn("Enregistrer", Pal.GREEN) {
             for ((k, f) in fields) st.put(k, f.text.toString().trim())
