@@ -58,7 +58,7 @@ class Settings(ctx: Context) {
     companion object {
         val DEFAULTS = mapOf(
             "url" to "http://100.124.61.8:8080",   // serveur Wake-on-LAN (tablette, via Tailscale)
-            "pin" to "395474",
+            "pin" to "",
             "host" to "192.168.1.19",              // PC, réseau local
             "host2" to "100.77.121.120"            // PC, Tailscale
         )

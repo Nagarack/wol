@@ -64,7 +64,7 @@ class QbClient(private val st: Settings) {
                 val key = u + "\n" + p
                 if (key == failKey && System.currentTimeMillis() - failAt < 60000L) return Result(failMsg, empty)
                 val l = req("POST", "/api/v2/auth/login", "username=" + Net.enc(u) + "&password=" + Net.enc(p))
-                if (!l.body.trim().startsWith("Ok")) {
+                if (!(l.ok && !l.body.trim().startsWith("Fails"))) {
                     failKey = key
                     failAt = System.currentTimeMillis()
                     failMsg = "Connexion qBittorrent refusée (HTTP " + l.code + ") : " + l.body.trim().take(150) +

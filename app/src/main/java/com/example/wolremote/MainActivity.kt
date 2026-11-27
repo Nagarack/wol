@@ -94,7 +94,8 @@ class MainActivity : Activity() {
         show(0)
     }
 
-    override fun onResume() { super.onResume(); handler.post(poll) }
+    private val updater by lazy { Updater(this) }
+    override fun onResume() { super.onResume(); handler.post(poll); updater.check() }
     override fun onPause() { super.onPause(); handler.removeCallbacks(poll) }
 
     private fun show(i: Int) {
