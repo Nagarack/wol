@@ -14,6 +14,7 @@ class QueueTab(private val a: Activity, private val st: Settings, private val qb
     val view = ScrollView(a)
     private val col = LinearLayout(a)
     private val info = a.tv("", 14f, Pal.MUTED)
+    private val head = a.title("En cours")
     private val list = LinearLayout(a)
     private var busy = false
 
@@ -26,9 +27,9 @@ class QueueTab(private val a: Activity, private val st: Settings, private val qb
     init {
         view.isFillViewport = true
         col.orientation = LinearLayout.VERTICAL
-        col.setPadding(a.dp(16), a.dp(16), a.dp(16), a.dp(16))
+        col.setPadding(a.dp(20), a.dp(20), a.dp(20), a.dp(28))
         view.addView(col)
-        col.addView(a.title("En cours"))
+        col.addView(head)
         info.setPadding(0, a.dp(6), 0, 0)
         col.addView(info)
         list.orientation = LinearLayout.VERTICAL
@@ -101,7 +102,8 @@ class QueueTab(private val a: Activity, private val st: Settings, private val qb
             a.runOnUiThread {
                 busy = false
                 list.removeAllViews()
-                info.text = if (errs.isEmpty()) (if (items.isEmpty()) "Aucun téléchargement Radarr / Sonarr." else "") else errs.joinToString("\n")
+                head.text = if (items.isEmpty()) "En cours" else "En cours (" + items.size + ")"
+                info.text = if (errs.isEmpty()) (if (items.isEmpty()) "Rien en téléchargement pour le moment.\nLes films et séries envoyés depuis Chercher apparaîtront ici." else "") else errs.joinToString("\n")
                 for (item in items) {
                     val c = a.card()
                     c.addView(a.tv(item.title, 14f, Pal.FG))

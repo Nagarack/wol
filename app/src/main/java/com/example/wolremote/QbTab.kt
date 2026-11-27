@@ -32,7 +32,7 @@ class QbTab(private val a: Activity, private val st: Settings, private val clien
     init {
         view.isFillViewport = true
         col.orientation = LinearLayout.VERTICAL
-        col.setPadding(a.dp(16), a.dp(16), a.dp(16), a.dp(16))
+        col.setPadding(a.dp(20), a.dp(20), a.dp(20), a.dp(28))
         view.addView(col)
         col.addView(a.title("qBittorrent"))
         info.setPadding(0, a.dp(6), 0, 0)

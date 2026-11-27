@@ -21,7 +21,7 @@ class SettingsTab(private val a: Activity, private val st: Settings) {
     init {
         val root = LinearLayout(a)
         root.orientation = LinearLayout.VERTICAL
-        root.setPadding(a.dp(16), a.dp(16), a.dp(16), a.dp(24))
+        root.setPadding(a.dp(20), a.dp(20), a.dp(20), a.dp(28))
         view.addView(root)
         var col = root
         val bodies = ArrayList<LinearLayout>()
