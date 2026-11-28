@@ -1,7 +1,7 @@
 # WOL_AGENT
 # Agent : extinction + Chroniques (lancer / arreter / etat). Lance au demarrage, en SYSTEM.
 $cfg    = Get-Content "C:\wol\config.json" -Raw | ConvertFrom-Json
-$agentVersion = 13
+$agentVersion = 14
 $task   = "WOL Chroniques"
 $folder = "C:\Users\Baka\Desktop\Chroniques"
 # Programmes ouverts "sur" le dossier mais qui ne sont pas le serveur : ignores

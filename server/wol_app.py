@@ -22,7 +22,7 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 # WOL_SERVER : ce fichier ne contient AUCUN secret. PIN, secret, MAC, IP... sont dans ~/wol_config.json
-VERSION = 13
+VERSION = 14
 UPDATE_BASE = "https://raw.githubusercontent.com/Nagarack/wol/main/server/"
 CONFIG_FILE = os.path.expanduser("~/wol_config.json")
 # ================= CONFIG (valeurs par défaut, surchargées par ~/wol_config.json) =================
@@ -328,6 +328,22 @@ def tv_keys(ip, keys, port=8002, use_ssl=True, timeout=None):
                 _tv_conn.pop(ip, None)
                 if attempt == 1:
                     raise
+
+
+SEEN_FILE = os.path.expanduser("~/wol_seen.json")
+
+
+def seen_load():
+    try:
+        with open(SEEN_FILE, encoding="utf-8") as f:
+            return set(json.load(f))
+    except Exception:
+        return set()
+
+
+def seen_save(s):
+    with open(SEEN_FILE, "w", encoding="utf-8") as f:
+        json.dump(sorted(s), f)
 
 
 def tv_close_app(ip):
@@ -876,6 +892,8 @@ class WebHandler(BaseHTTPRequestHandler):
                     return self._json(200, json.loads(r.read()))
             except Exception:
                 return self._json(200, {"version": None})
+        if self.path == "/seen":
+            return self._json(200, {"items": sorted(seen_load())})
         if self.path == "/vacation":
             return self._json(200, {"on": vacation})
         if self.path == "/docker/status":
@@ -931,6 +949,17 @@ class WebHandler(BaseHTTPRequestHandler):
                         "invalid": "Fichier téléchargé invalide, rien n'a changé",
                         "error": "Le PC n'a pas pu télécharger la mise à jour"}
                 return self._json(200, {"message": msgs.get(res.get("result"), "OK")})
+            if self.path == "/seen":
+                k = str(data.get("key", ""))[:40]
+                if not k:
+                    return self._json(400, {"message": "Titre manquant"})
+                s = seen_load()
+                if data.get("on", True):
+                    s.add(k)
+                else:
+                    s.discard(k)
+                seen_save(s)
+                return self._json(200, {"ok": True, "count": len(s)})
             if self.path == "/vacation":
                 vacation = bool(data.get("on"))
                 if vacation:

@@ -94,6 +94,38 @@ fun radarrIdOf(st: Settings, tmdb: Int): Int {
     return 0
 }
 
+// Titres « déjà vus » : liste gardée sur la tablette (partagée entre appareils), et marquage « vu » dans Jellyfin si le titre y est
+object Seen {
+    val keys = HashSet<String>()
+    fun key(o: JSONObject): String = if (o.has("tvdbId") && o.optInt("tvdbId") > 0) "v" + o.optInt("tvdbId") else (if (o.optBoolean("tv")) "t" else "m") + o.optInt("tmdbId")
+    fun has(o: JSONObject) = keys.contains(key(o))
+
+    fun load(st: Settings) {
+        try {
+            val r = Net.call("GET", st.tablet() + "/seen", timeout = 8000)
+            if (r.ok) { val a = JSONObject(r.body).optJSONArray("items") ?: return; keys.clear(); for (i in 0 until a.length()) keys.add(a.optString(i)) }
+        } catch (e: Exception) { }
+    }
+
+    fun set(st: Settings, o: JSONObject, on: Boolean): Boolean {
+        val k = key(o)
+        val ok = try { Net.call("POST", st.tablet() + "/seen", json = JSONObject().put("pin", st.pin()).put("key", k).put("on", on).toString(), timeout = 8000).ok } catch (e: Exception) { false }
+        if (!ok) return false
+        if (on) keys.add(k) else keys.remove(k)
+        // Jellyfin : marque vu / non vu si le titre est dans la bibliothèque
+        try {
+            val tmdb = o.optInt("tmdbId")
+            if (tmdb > 0 && st.get("kJellyfin").isNotEmpty()) {
+                val uid = Follow.userId(st)
+                val r = Jellyfin.get(st, "/Users/$uid/Items?Recursive=true&IncludeItemTypes=Movie,Series&AnyProviderIdEquals=Tmdb.$tmdb&Limit=3", 10000)
+                val a = JSONObject(r.body).optJSONArray("Items")
+                if (r.ok && a != null) for (i in 0 until a.length()) Follow.mark(st, a.optJSONObject(i).str("Id"), on)
+            }
+        } catch (e: Exception) { }
+        return true
+    }
+}
+
 // Retrait d'un film suivi : arrête ses téléchargements puis le retire de Radarr
 object MovieRemove {
     fun run(st: Settings, tmdb: Int, deleteFiles: Boolean): String? {
@@ -517,6 +549,13 @@ object LibraryUi5 {
         sortScroll.visibility = if (Tmdb.has(st)) android.view.View.VISIBLE else android.view.View.GONE
         body.addView(modes); body.addView(hs); body.addView(sortScroll); body.addView(info); body.addView(list)
         var sortKey = ""
+        var fview = "todo"   // todo = masque les vus ; suivis ; pas suivis ; vus
+        val filtScroll = android.widget.HorizontalScrollView(a)
+        filtScroll.isHorizontalScrollBarEnabled = false
+        val filtRow = LinearLayout(a); filtRow.orientation = LinearLayout.HORIZONTAL
+        filtScroll.addView(filtRow)
+        filtScroll.setPadding(0, a.dp(8), 0, 0)
+        body.addView(filtScroll, body.indexOfChild(sortScroll))
         var lastL: List<JSONObject> = emptyList()
         dialog(a, "Découvrir", body)
         // Avertit si des listes ajoutent des films/séries toutes seules (hors de l'appli)
@@ -560,9 +599,12 @@ object LibraryUi5 {
         }
         fun show(l0: List<JSONObject>) {
             lastL = l0
-            val l = sorted(l0)
+            val l = sorted(l0.filter { o ->
+                val s = Seen.has(o)
+                when (fview) { "suivis" -> o.optBoolean("track") && !s; "pas" -> !o.optBoolean("track") && !s; "vus" -> s; else -> !s }
+            })
             list.removeAllViews()
-            info.text = if (l.isEmpty()) "Rien pour l'instant. " + (if (mode == "films" && !Tmdb.has(st)) Discover.lastInfo else "Réessaie dans une minute.") else "Touche un titre pour l'ajouter et lancer son téléchargement (déjà ajouté : relancer ou ne plus suivre). Appui long : résumé complet." + (if (Tmdb.has(st)) (if (Tmdb.lastHidden > 0) "\n" + Tmdb.lastHidden + " déjà dans ta bibliothèque, masqué(s)." else "") else if (mode == "films") "\n\n" + Discover.lastInfo else "")
+            info.text = if (l.isEmpty()) (if (fview != "todo") "Aucun titre dans ce filtre." else "Rien pour l'instant. ") + (if (mode == "films" && !Tmdb.has(st)) Discover.lastInfo else "Réessaie dans une minute.") else "Touche un titre pour l'ajouter et lancer son téléchargement (déjà ajouté : relancer ou ne plus suivre). Appui long : résumé complet." + (if (Tmdb.has(st)) (if (Tmdb.lastHidden > 0) "\n" + Tmdb.lastHidden + " déjà dans ta bibliothèque, masqué(s)." else "") else if (mode == "films") "\n\n" + Discover.lastInfo else "")
             for (o in l) {
                 val isShow = o.has("tvdbId")
                 val row = LinearLayout(a); row.orientation = LinearLayout.HORIZONTAL
@@ -587,7 +629,17 @@ object LibraryUi5 {
                 if (o.optDouble("rating", 0.0) > 0) meta.addView(a.badge(String.format(java.util.Locale.FRANCE, "★ %.1f", o.optDouble("rating")), Pal.AMBER))
                 if (o.optInt("votes") > 0) meta.addView(a.badge(o.optInt("votes").toString() + " votes", Pal.MUTED))
                 if (o.optBoolean("track")) meta.addView(a.badge("Suivi, pas téléchargé", Pal.BLUE))
+                if (Seen.has(o)) meta.addView(a.badge("Vu", Pal.GREEN))
                 t.addView(meta)
+                val seenBtn = a.btn2(if (Seen.has(o)) "Pas vu finalement" else "Déjà vu", Pal.MUTED, 36) {}
+                seenBtn.textSize = 13f
+                seenBtn.setOnClickListener {
+                    val on = !Seen.has(o)
+                    thread {
+                        val ok = Seen.set(st, o, on)
+                        a.runOnUiThread { if (ok) showRef(lastL) else info.text = "Tablette injoignable : impossible d'enregistrer." }
+                    }
+                }
                 if (o.str("sub").isNotEmpty()) t.addView(a.tv(o.str("sub"), 12f, Pal.BLUE))
                 if (o.str("why").isNotEmpty()) t.addView(a.tv("Comme « " + o.str("why") + " »", 12f, Pal.BLUE))
                 val ov = o.str("overview").ifEmpty { "Pas de résumé." }
@@ -595,6 +647,7 @@ object LibraryUi5 {
                 state.maxLines = 4; state.ellipsize = android.text.TextUtils.TruncateAt.END
                 state.setLineSpacing(a.dp(2).toFloat(), 1f)
                 t.addView(state)
+                t.addView(seenBtn, LinearLayout.LayoutParams(WRAP, WRAP).also { it.topMargin = a.dp(6) })
                 row.addView(t, LinearLayout.LayoutParams(0, WRAP, 1f))
                 row.setOnLongClickListener { state.maxLines = if (state.maxLines == 4) 40 else 4; true }
                 row.setOnClickListener {
@@ -671,6 +724,11 @@ object LibraryUi5 {
                 add(sortRow, chip(lbl, sortKey == k) { sortKey = k; sortRender(); showRef(lastL) })
         }
         showRef = { l -> show(l) }
+        fun filtRender() {
+            filtRow.removeAllViews()
+            for ((lbl, k) in listOf("À voir" to "todo", "Suivis" to "suivis", "Pas suivis" to "pas", "Vus" to "vus"))
+                add(filtRow, chip(lbl, fview == k) { fview = k; filtRender(); showRef(lastL) })
+        }
         fun chipsRender() {
             chips.removeAllViews()
             for (k in kinds()) add(chips, chip(k, k == cur) { cur = k; chipsRender(); load(k) })
@@ -678,6 +736,8 @@ object LibraryUi5 {
 
         fun start() {
             chipsRender()
+            filtRender()
+            thread { Seen.load(st); a.runOnUiThread { if (lastL.isNotEmpty()) showRef(lastL) } }
             if (Tmdb.has(st)) sortRender()
             list.removeAllViews()
             if (mode == "series" || Tmdb.has(st)) { load(cur); return }
