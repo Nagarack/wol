@@ -192,11 +192,12 @@ object RemoteUi {
         fun row(vararg b: android.widget.Button): LinearLayout {
             val r = LinearLayout(a)
             r.orientation = LinearLayout.HORIZONTAL
-            for (v in b) { compact(v); v.layoutParams = LinearLayout.LayoutParams(0, v.minimumHeight, 1f).also { it.leftMargin = a.dp(3); it.rightMargin = a.dp(3); it.topMargin = a.dp(8) }; r.addView(v) }
+            r.isBaselineAligned = false
+            for (v in b) { compact(v); v.layoutParams = LinearLayout.LayoutParams(0, v.minimumHeight, 1f).also { it.leftMargin = a.dp(3); it.rightMargin = a.dp(3); it.topMargin = a.dp(5) }; r.addView(v) }
             return r
         }
         // Touche avec retour tactile immédiat ; maintenue, elle se répète (volume, flèches)
-        fun key(label: String, k: String, repeat: Boolean = false, h: Int = 56): android.widget.Button {
+        fun key(label: String, k: String, repeat: Boolean = false, h: Int = 48): android.widget.Button {
             val b = a.btn2(label, Pal.FG, h) {}
             var rep: Runnable? = null
             b.setOnTouchListener { v, e ->
@@ -218,24 +219,24 @@ object RemoteUi {
             keyBtns.add(b)
             return b
         }
-        val wake = a.btn("Allumer", Pal.GREEN, 52) {
+        val wake = a.btn("Allumer", Pal.GREEN, 46) {
             setMsg("Allumage… (jusqu'à 15 s)", null)
             thread {
                 val (ok, m) = Remote.tvWake(st)
                 a.runOnUiThread { setMsg(m, ok) }
             }
         }
-        val off = a.btn2("Éteindre", Pal.RED, 52) {
+        val off = a.btn2("Éteindre", Pal.RED, 46) {
             a.dialogBuilder().setMessage("Éteindre la télévision ?").setPositiveButton("Éteindre") { _, _ -> fire("Extinction envoyée", listOf("KEY_POWER")) }.setNegativeButton("Annuler", null).show()
         }
         c.addView(row(wake, off))
-        c.addView(a.tv("Volume", 12f, Pal.MUTED).also { it.setPadding(0, a.dp(14), 0, 0) })
-        c.addView(row(key("Vol −", "KEY_VOLDOWN", true, 60), key("Muet", "KEY_MUTE", false, 60), key("Vol +", "KEY_VOLUP", true, 60)))
-        c.addView(a.tv("Navigation (maintiens une flèche pour répéter)", 12f, Pal.MUTED).also { it.setPadding(0, a.dp(14), 0, 0) })
+        c.addView(a.tv("Volume", 12f, Pal.MUTED).also { it.setPadding(0, a.dp(8), 0, 0) })
+        c.addView(row(key("Vol −", "KEY_VOLDOWN", true, 50), key("Muet", "KEY_MUTE", false, 50), key("Vol +", "KEY_VOLUP", true, 50)))
+        c.addView(a.tv("Navigation", 12f, Pal.MUTED).also { it.setPadding(0, a.dp(8), 0, 0) })
         c.addView(row(key("Accueil", "KEY_HOME"), key("▲", "KEY_UP", true), key("Retour", "KEY_RETURN")))
         c.addView(row(key("◀", "KEY_LEFT", true), key("OK", "KEY_ENTER"), key("▶", "KEY_RIGHT", true)))
         c.addView(row(key("Source", "KEY_SOURCE"), key("▼", "KEY_DOWN", true), key("Menu", "KEY_MENU")))
-        c.addView(row(key("⏪", "KEY_REWIND", true, 52), key("▶❚❚", "KEY_PLAY", false, 52), key("⏩", "KEY_FF", true, 52)))
+        c.addView(row(key("⏪", "KEY_REWIND", true, 46), key("▶❚❚", "KEY_PLAY", false, 46), key("⏩", "KEY_FF", true, 46)))
         val more = LinearLayout(a)
         more.orientation = LinearLayout.VERTICAL
         more.visibility = android.view.View.GONE
@@ -291,14 +292,15 @@ object RemoteUi {
         val c = a.card()
         var cur = x   // dernier état connu : les boutons ±30 s partent de la position actuelle
         fun go(f: () -> Boolean) { thread { try { f() } catch (e: Exception) { } } }
-        fun bt(lbl: String, f: () -> Boolean): android.widget.Button = a.btn2(lbl, Pal.FG, 44) { go(f) }
+        fun bt(lbl: String, f: () -> Boolean): android.widget.Button = a.btn2(lbl, Pal.FG, 42) { go(f) }
         fun row(vararg b: android.widget.Button): LinearLayout {
             val r = LinearLayout(a)
             r.orientation = LinearLayout.HORIZONTAL
+            r.isBaselineAligned = false
             for (v in b) {
                 compact(v)
                 val lp = LinearLayout.LayoutParams(0, v.minimumHeight, 1f)
-                lp.leftMargin = a.dp(3); lp.rightMargin = a.dp(3); lp.topMargin = a.dp(8)
+                lp.leftMargin = a.dp(3); lp.rightMargin = a.dp(3); lp.topMargin = a.dp(5)
                 v.layoutParams = lp
                 r.addView(v)
             }
