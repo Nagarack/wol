@@ -248,6 +248,26 @@ fun Activity.mediaCard(imgUrl: String, wDp: Int, hDp: Int, title: String, badges
     return Pair(row, col)
 }
 
+// Fenêtre presque plein écran avec défilement
+fun Activity.bigDialog(title: String, body: LinearLayout, close: String = "Fermer", onClose: (() -> Unit)? = null): AlertDialog {
+    body.setPadding(dp(16), dp(8), dp(16), dp(8))
+    val sv = android.widget.ScrollView(this)
+    sv.addView(body)
+    val b = dialogBuilder().setTitle(title).setView(sv).setPositiveButton(close) { _, _ -> onClose?.invoke() }
+    if (onClose != null) b.setOnDismissListener { onClose() }
+    val d = b.show()
+    d.window?.setLayout((resources.displayMetrics.widthPixels * 0.96).toInt(), (resources.displayMetrics.heightPixels * 0.9).toInt())
+    return d
+}
+
+// Ligne de texte présentée comme une carte
+fun Activity.asCard(v: TextView): TextView {
+    v.setPadding(dp(14), dp(14), dp(14), dp(14))
+    v.background = rounded(Pal.CARD, 14, Pal.BORDER)
+    v.layoutParams = LinearLayout.LayoutParams(MATCH, WRAP).also { it.topMargin = dp(8) }
+    return v
+}
+
 fun Activity.card(): LinearLayout {
     val c = LinearLayout(this)
     c.orientation = LinearLayout.VERTICAL

@@ -158,10 +158,7 @@ object Subs {
 // Fenêtres d'affichage
 object LibraryUi {
     private fun box(a: Activity, title: String, body: LinearLayout, close: String = "Fermer") {
-        val sv = ScrollView(a)
-        body.setPadding(a.dp(16), a.dp(8), a.dp(16), a.dp(8))
-        sv.addView(body)
-        a.dialogBuilder().setTitle(title).setView(sv).setPositiveButton(close, null).show()
+        a.bigDialog(title, body, close)
     }
 
     fun storage(a: Activity, st: Settings) {
@@ -174,12 +171,19 @@ object LibraryUi {
                 val d = Storage.disks(st)
                 val big = Storage.biggest(st)
                 a.runOnUiThread {
-                    info.text = if (d.isEmpty()) "Espace disque indisponible (clé Radarr/Sonarr ?)"
-                    else d.joinToString("\n") { it.label + " : " + fmtSize(it.free) + " libres sur " + fmtSize(it.total) + " (" + it.freePct + " %)" }
+                    info.text = if (d.isEmpty()) "Espace disque indisponible (clé Radarr/Sonarr ?)" else ""
+                    info.visibility = if (d.isEmpty()) android.view.View.VISIBLE else android.view.View.GONE
+                    for ((k, x) in d.withIndex()) {
+                        val c = a.card()
+                        c.addView(a.tv(x.label, 16f, Pal.FG).also { it.typeface = android.graphics.Typeface.DEFAULT_BOLD })
+                        c.addView(a.progress(100 - x.freePct))
+                        c.addView(a.tv(fmtSize(x.free) + " libres sur " + fmtSize(x.total) + "  ·  " + x.freePct + " %", 13f, if (x.freePct < 10) Pal.RED else Pal.MUTED))
+                        body.addView(c, 1 + k)
+                    }
                     body.addView(a.section("Plus gros contenus (touche pour supprimer)"))
                     for (e in big) {
-                        val row = a.tv(fmtSize(e.size) + "   " + e.title, 14f, Pal.FG)
-                        row.setPadding(0, a.dp(10), 0, a.dp(10))
+                        val row = a.tv(fmtSize(e.size) + "  ·  " + e.title, 14f, Pal.FG)
+                        a.asCard(row)
                         row.setOnClickListener {
                             a.dialogBuilder().setMessage("Supprimer « " + e.title + " » et tous ses fichiers du disque ? C'est définitif.")
                                 .setPositiveButton("Supprimer") { _, _ ->
@@ -356,10 +360,7 @@ object Follow {
 
 object LibraryUi2 {
     private fun box(a: Activity, title: String, body: LinearLayout) {
-        val sv = ScrollView(a)
-        body.setPadding(a.dp(16), a.dp(8), a.dp(16), a.dp(8))
-        sv.addView(body)
-        a.dialogBuilder().setTitle(title).setView(sv).setPositiveButton("Fermer", null).show()
+        a.bigDialog(title, body)
     }
 
     fun follow(a: Activity, st: Settings) {
@@ -374,7 +375,7 @@ object LibraryUi2 {
                     info.text = if (n.isEmpty()) "Rien en attente : tu es à jour." else "Prochain épisode à voir pour chaque série."
                     for (x in n) {
                         val row = a.card()
-                        row.addView(a.tv(x.series, 15f, Pal.FG))
+                        row.addView(a.tv(x.series, 16f, Pal.FG).also { it.typeface = android.graphics.Typeface.DEFAULT_BOLD })
                         val sub = a.tv(x.label, 13f, Pal.MUTED)
                         row.addView(sub)
                         val br = LinearLayout(a)
@@ -421,7 +422,7 @@ object LibraryUi2 {
                     info.text = low.size.toString() + " film(s) sous 720p. Touche un film pour chercher une meilleure version (selon ton profil de qualité Radarr)."
                     for (m in low) {
                         val row = a.tv(m.title + "  ·  " + m.q, 14f, Pal.FG)
-                        row.setPadding(0, a.dp(10), 0, a.dp(10))
+                        a.asCard(row)
                         row.setOnClickListener {
                             thread {
                                 val ok = try { Quality.search(st, m.id) } catch (e: Exception) { false }
@@ -501,16 +502,15 @@ object LibraryUi3 {
         val body = LinearLayout(a); body.orientation = LinearLayout.VERTICAL
         val info = a.tv("Analyse…", 14f, Pal.MUTED)
         body.addView(info)
-        val sv = ScrollView(a); body.setPadding(a.dp(16), a.dp(8), a.dp(16), a.dp(8)); sv.addView(body)
-        a.dialogBuilder().setTitle("Nettoyage").setView(sv).setPositiveButton("Fermer", null).show()
+        a.bigDialog("Nettoyage", body)
         thread {
             try {
                 val c = Cleanup.candidates(st)
                 a.runOnUiThread {
                     info.text = if (c.isEmpty()) "Aucun film vu depuis plus de 3 mois." else c.size.toString() + " film(s) vus il y a plus de 3 mois, " + fmtSize(c.sumOf { it.size }) + " à récupérer. Touche pour supprimer, appui long pour marquer non vu."
                     for (e in c) {
-                        val row = a.tv(fmtSize(e.size) + "   " + e.title, 14f, Pal.FG)
-                        row.setPadding(0, a.dp(10), 0, a.dp(10))
+                        val row = a.tv(fmtSize(e.size) + "  ·  " + e.title, 14f, Pal.FG)
+                        a.asCard(row)
                         row.setOnClickListener {
                             a.dialogBuilder().setMessage("Supprimer « " + e.title + " » et son fichier ? C'est définitif.")
                                 .setPositiveButton("Supprimer") { _, _ ->

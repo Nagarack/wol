@@ -69,11 +69,7 @@ object RemoteUi {
         list.orientation = LinearLayout.VERTICAL
         body.addView(list)
         var alive = true
-        val sv = ScrollView(a)
-        sv.addView(body)
-        a.dialogBuilder().setTitle("Télécommande").setView(sv)
-            .setPositiveButton("Fermer") { _, _ -> alive = false }
-            .setOnDismissListener { alive = false }.show()
+        a.bigDialog("Télécommande", body) { alive = false }
         thread {
             var sig = ""
             while (alive) {
@@ -98,7 +94,7 @@ object RemoteUi {
 
     private fun card(a: Activity, st: Settings, x: Remote.Sess): LinearLayout {
         val c = a.card()
-        c.addView(a.tv(x.name, 16f, Pal.FG))
+        c.addView(a.tv(x.name, 17f, Pal.FG).also { it.typeface = android.graphics.Typeface.DEFAULT_BOLD })
         c.addView(a.tv(if (x.title.isEmpty()) "Rien en lecture" else (if (x.paused) "En pause · " else "") + x.title, 13f, Pal.MUTED))
         fun bt(lbl: String, f: () -> Boolean): android.widget.Button = a.btn2(lbl, Pal.FG, 44) { thread { try { f() } catch (e: Exception) { } } }
         fun row(vararg b: android.widget.Button) {

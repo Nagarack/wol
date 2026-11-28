@@ -545,11 +545,7 @@ object LibraryUi5 {
 
     private fun dialog(a: Activity, title: String, body: LinearLayout) {
         body.setPadding(a.dp(16), a.dp(8), a.dp(16), a.dp(8))
-        val sv = ScrollView(a)
-        sv.addView(body)
-        val d = a.dialogBuilder().setTitle(title).setView(sv).setPositiveButton("Fermer", null).show()
-        // Presque plein écran : plus de place pour lire les fiches
-        d.window?.setLayout((a.resources.displayMetrics.widthPixels * 0.96).toInt(), (a.resources.displayMetrics.heightPixels * 0.9).toInt())
+        a.bigDialog(title, body)
     }
 
     fun resume(a: Activity, st: Settings) {
