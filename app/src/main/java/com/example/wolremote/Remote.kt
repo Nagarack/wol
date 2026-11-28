@@ -237,6 +237,16 @@ object RemoteUi {
             a.dialogBuilder().setMessage("Éteindre la télévision ?").setPositiveButton("Éteindre") { _, _ -> fire("Extinction envoyée", listOf("KEY_POWER")) }.setNegativeButton("Annuler", null).show()
         }
         c.addView(row(wake, off))
+        c.addView(row(a.btn2("Fermer Jellyfin (quitter l'appli)", Pal.AMBER, 46) {
+            setMsg("Fermeture de l'appli…", null)
+            thread {
+                val m = try {
+                    val rr = Net.call("POST", st.tablet() + "/tv/closeapp", json = JSONObject().put("pin", st.pin()).put("ip", st.get("kTvIp").trim()).toString(), timeout = 30000)
+                    if (rr.ok) JSONObject(rr.body).optString("message", "OK") else "Erreur " + rr.code
+                } catch (e: Exception) { "Tablette injoignable" }
+                a.runOnUiThread { setMsg(m, true) }
+            }
+        }))
         c.addView(a.tv("Volume", 12f, Pal.MUTED).also { it.setPadding(0, a.dp(8), 0, 0) })
         c.addView(row(key("Vol −", "KEY_VOLDOWN", true, 50), key("Muet", "KEY_MUTE", false, 50), key("Vol +", "KEY_VOLUP", true, 50)))
         c.addView(a.tv("Navigation", 12f, Pal.MUTED).also { it.setPadding(0, a.dp(8), 0, 0) })

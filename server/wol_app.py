@@ -22,7 +22,7 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 # WOL_SERVER : ce fichier ne contient AUCUN secret. PIN, secret, MAC, IP... sont dans ~/wol_config.json
-VERSION = 10
+VERSION = 11
 UPDATE_BASE = "https://raw.githubusercontent.com/Nagarack/wol/main/server/"
 CONFIG_FILE = os.path.expanduser("~/wol_config.json")
 # ================= CONFIG (valeurs par défaut, surchargées par ~/wol_config.json) =================
@@ -312,6 +312,12 @@ def tv_keys(ip, keys, port=8002, use_ssl=True, timeout=None):
                     ws = _tv_connect(ip, port, use_ssl, timeout)
                     _tv_conn[ip] = ws
                 for k in keys:
+                    if k.endswith(":hold"):   # appui long (ex. Retour long = quitter l'appli)
+                        k = k[:-5]
+                        for cmd, d in (("Press", 1.8), ("Release", 0.1)):
+                            ws.send(json.dumps({"method": "ms.remote.control", "params": {"Cmd": cmd, "DataOfCmd": k, "Option": "false", "TypeOfRemote": "SendRemoteKey"}}))
+                            time.sleep(d)
+                        continue
                     ws.send(json.dumps({"method": "ms.remote.control", "params": {"Cmd": "Click", "DataOfCmd": k, "Option": "false", "TypeOfRemote": "SendRemoteKey"}}))
                     time.sleep(0.12 if len(keys) > 1 else 0.02)
                 ws.t = time.time()
@@ -322,6 +328,30 @@ def tv_keys(ip, keys, port=8002, use_ssl=True, timeout=None):
                 _tv_conn.pop(ip, None)
                 if attempt == 1:
                     raise
+
+
+def tv_close_app(ip):
+    """Ferme vraiment l'appli en cours sur la télé : API applications (DELETE) si la télé l'accepte, sinon Retour long puis Exit."""
+    ids = []
+    try:
+        with urllib.request.urlopen(f"http://{ip}:8001/api/v2/applications", timeout=4) as r:
+            for a in json.loads(r.read()).get("data", {}).get("applications", []) or []:
+                if "jellyfin" in json.dumps(a).lower():
+                    ids.append(a.get("appId") or a.get("id"))
+    except Exception:
+        pass
+    ids += ["AprZAARz4r.Jellyfin"]
+    for i in [x for x in ids if x]:
+        try:
+            req = urllib.request.Request(f"http://{ip}:8001/api/v2/applications/{i}", method="DELETE")
+            with urllib.request.urlopen(req, timeout=4) as r:
+                if r.status < 300 and json.loads(r.read() or b"{}").get("result", True) is not False:
+                    return "Jellyfin fermé"
+        except Exception:
+            pass
+    tv_keys(ip, ["KEY_RETURN:hold"])
+    tv_keys(ip, ["KEY_EXIT"])
+    return "Fermeture envoyée (Retour long + Exit)"
 
 
 # ---------------- Minuteur d'arrêt : télé / PC (tourne sur la tablette, même appli fermée) ----------------
@@ -892,6 +922,14 @@ class WebHandler(BaseHTTPRequestHandler):
                 except Exception as e:
                     return self._json(200, {"ok": False, "message": f"Télé injoignable ou refus : {e}"})
                 return self._json(200, {"ok": True, "message": "OK"})
+            if self.path == "/tv/closeapp":
+                ip = str(data.get("ip", "")).strip()
+                if not ip:
+                    return self._json(400, {"message": "Adresse de la télé manquante"})
+                try:
+                    return self._json(200, {"ok": True, "message": tv_close_app(ip)})
+                except Exception as e:
+                    return self._json(200, {"ok": False, "message": f"Télé injoignable ou refus : {e}"})
             if self.path == "/sleep/set":
                 if data.get("mode") not in ("timer", "end", "episodes", "idle"):
                     return self._json(400, {"message": "Mode inconnu"})
