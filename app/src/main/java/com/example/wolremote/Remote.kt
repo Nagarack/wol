@@ -11,20 +11,29 @@ import kotlin.concurrent.thread
 object Remote {
     class Sess(val id: String, val name: String, val title: String, val paused: Boolean, val pos: Long)
 
+    // Sessions vues par Jellyfin mais non pilotables (pour le diagnostic)
+    var skipped: List<String> = emptyList()
+
     fun sessions(st: Settings): List<Sess> {
-        val r = Jellyfin.get(st, "/Sessions", 8000)
+        // Par défaut Jellyfin n'affiche que les sessions actives depuis 16 min : on élargit à 1 h
+        val r = Jellyfin.get(st, "/Sessions?ActiveWithinSeconds=3600", 8000)
         if (!r.ok) throw Exception("Jellyfin : HTTP " + r.code)
         val a = JSONArray(r.body)
         val out = ArrayList<Sess>()
+        val sk = ArrayList<String>()
         for (i in 0 until a.length()) {
             val o = a.optJSONObject(i) ?: continue
-            if (!o.optBoolean("SupportsRemoteControl", false)) continue
+            if (!o.optBoolean("SupportsRemoteControl", false)) {
+                sk.add(o.str("DeviceName").ifEmpty { o.str("Client") } + " (" + o.str("Client") + ")")
+                continue
+            }
             val np = o.optJSONObject("NowPlayingItem")
             val ps = o.optJSONObject("PlayState")
             val title = if (np == null) "" else (if (np.str("Type") == "Episode") np.str("SeriesName") + " · " + np.str("Name") else np.str("Name"))
             out.add(Sess(o.str("Id"), o.str("DeviceName").ifEmpty { o.str("Client") }, title,
                 ps?.optBoolean("IsPaused", false) ?: false, ps?.optLong("PositionTicks", 0L) ?: 0L))
         }
+        skipped = sk.distinct()
         return out
     }
 
@@ -77,7 +86,7 @@ object RemoteUi {
                     val s = Remote.sessions(st)
                     val ns = s.joinToString("|") { it.id + it.title + it.paused }
                     a.runOnUiThread {
-                        info.text = if (s.isEmpty()) "Aucun appareil connecté. Ouvre l'appli Jellyfin sur la télévision." else "Appareils connectés"
+                        info.text = if (s.isEmpty()) "Aucun appareil pilotable." + (if (Remote.skipped.isNotEmpty()) "\nJellyfin voit, sans pouvoir les piloter : " + Remote.skipped.joinToString(", ") + "." else "\nJellyfin ne voit aucune session récente : ouvre l'appli Jellyfin sur la télévision, connectée à ton compte, sur l'écran d'accueil.") else "Appareils connectés"
                         if (ns != sig) {
                             sig = ns
                             list.removeAllViews()
