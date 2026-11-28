@@ -477,11 +477,11 @@ object Cleanup {
 
 // Que regarder ce soir : films non vus tirés au hasard
 object Tonight {
-    class Movie(val id: String, val title: String, val minutes: Int, val rating: Double)
+    class Movie(val id: String, val title: String, val minutes: Int, val rating: Double, val year: Int = 0, val overview: String = "")
 
     fun pick(st: Settings, minMin: Int, maxMin: Int): List<Movie> {
         val uid = Follow.userId(st)
-        val r = Jellyfin.get(st, "/Users/$uid/Items?IncludeItemTypes=Movie&Recursive=true&IsPlayed=false&SortBy=Random&Limit=60&Fields=RunTimeTicks", 20000)
+        val r = Jellyfin.get(st, "/Users/$uid/Items?IncludeItemTypes=Movie&Recursive=true&IsPlayed=false&SortBy=Random&Limit=60&Fields=RunTimeTicks,Overview", 20000)
         if (!r.ok) throw Exception("Jellyfin : HTTP " + r.code)
         val a = JSONObject(r.body).optJSONArray("Items") ?: return emptyList()
         val out = ArrayList<Movie>()
@@ -489,7 +489,7 @@ object Tonight {
             val o = a.optJSONObject(i) ?: continue
             val min = (o.optLong("RunTimeTicks", 0L) / 600000000L).toInt()
             if (min < minMin || min > maxMin) continue
-            out.add(Movie(o.str("Id"), o.str("Name") + (if (o.optInt("ProductionYear") > 0) " (" + o.optInt("ProductionYear") + ")" else ""), min, o.optDouble("CommunityRating", 0.0)))
+            out.add(Movie(o.str("Id"), o.str("Name"), min, o.optDouble("CommunityRating", 0.0), o.optInt("ProductionYear"), o.str("Overview")))
             if (out.size >= 5) break
         }
         return out
@@ -557,18 +557,14 @@ object LibraryUi3 {
                     a.runOnUiThread {
                         info.text = if (m.isEmpty()) "Aucun film non vu dans cette durée." else "Touche un film pour le lancer sur la télévision, appui long pour le marquer comme vu."
                         for (x in m) {
-                            val row = LinearLayout(a); row.orientation = LinearLayout.HORIZONTAL
-                            row.setPadding(0, a.dp(8), 0, a.dp(8))
-                            val img = android.widget.ImageView(a)
-                            img.scaleType = android.widget.ImageView.ScaleType.CENTER_CROP
-                            img.setBackgroundColor(Pal.CARD2)
-                            row.addView(img, LinearLayout.LayoutParams(a.dp(64), a.dp(96)))
-                            Img.load(st.base(8096) + "/Items/" + x.id + "/Images/Primary?maxHeight=300&quality=80", img)
-                            val t = LinearLayout(a); t.orientation = LinearLayout.VERTICAL
-                            t.setPadding(a.dp(12), 0, 0, 0)
-                            t.addView(a.tv(x.title, 15f, Pal.FG))
-                            t.addView(a.tv((x.minutes / 60).toString() + " h " + String.format("%02d", x.minutes % 60) + (if (x.rating > 0) "  ·  " + String.format(Locale.FRANCE, "%.1f", x.rating) + "/10" else ""), 13f, Pal.MUTED))
-                            row.addView(t, LinearLayout.LayoutParams(0, WRAP, 1f))
+                            val bd = ArrayList<Pair<String, Int>>()
+                            if (x.year > 0) bd.add(x.year.toString() to Pal.MUTED)
+                            bd.add((x.minutes / 60).toString() + " h " + String.format("%02d", x.minutes % 60) to Pal.MUTED)
+                            if (x.rating > 0) bd.add(String.format(Locale.FRANCE, "★ %.1f", x.rating) to Pal.AMBER)
+                            val (row, tcol) = a.mediaCard(st.base(8096) + "/Items/" + x.id + "/Images/Primary?maxHeight=300&quality=80", 88, 132, x.title, bd)
+                            val ovt = a.tv(x.overview.ifEmpty { "Pas de résumé." }, 13f, Pal.MUTED)
+                            ovt.maxLines = 4; ovt.ellipsize = android.text.TextUtils.TruncateAt.END; ovt.setLineSpacing(a.dp(2).toFloat(), 1f)
+                            tcol.addView(ovt)
                             row.setOnClickListener { RemoteUi.playOn(a, st, x.id, x.title) }
                             row.setOnLongClickListener {
                                 a.dialogBuilder().setMessage("Marquer « " + x.title + " » comme vu ?")
@@ -597,7 +593,8 @@ object LibraryUi3 {
         body.addView(info)
         body.addView(list)
         val sv = ScrollView(a); sv.addView(body)
-        a.dialogBuilder().setTitle("Ce soir").setView(sv).setPositiveButton("Fermer", null).show()
+        val dd = a.dialogBuilder().setTitle("Ce soir").setView(sv).setPositiveButton("Fermer", null).show()
+        dd.window?.setLayout((a.resources.displayMetrics.widthPixels * 0.96).toInt(), (a.resources.displayMetrics.heightPixels * 0.9).toInt())
         load(0, 999)
     }
 }

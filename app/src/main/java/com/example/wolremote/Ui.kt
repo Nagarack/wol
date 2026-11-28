@@ -215,6 +215,39 @@ fun Activity.roundView(v: android.view.View, radiusDp: Int) {
     v.clipToOutline = true
 }
 
+// Carte de média : image arrondie à gauche, titre en gras, badges, puis le contenu ajouté dans la colonne de droite
+fun Activity.mediaCard(imgUrl: String, wDp: Int, hDp: Int, title: String, badges: List<Pair<String, Int>>): Pair<LinearLayout, LinearLayout> {
+    val row = LinearLayout(this)
+    row.orientation = LinearLayout.HORIZONTAL
+    row.setPadding(dp(12), dp(12), dp(12), dp(12))
+    row.background = rounded(Pal.CARD, 14, Pal.BORDER)
+    val lp = LinearLayout.LayoutParams(MATCH, WRAP)
+    lp.topMargin = dp(10)
+    row.layoutParams = lp
+    val img = android.widget.ImageView(this)
+    img.scaleType = android.widget.ImageView.ScaleType.CENTER_CROP
+    img.setBackgroundColor(Pal.CARD2)
+    roundView(img, 8)
+    row.addView(img, LinearLayout.LayoutParams(dp(wDp), dp(hDp)))
+    Img.load(imgUrl, img)
+    val col = LinearLayout(this)
+    col.orientation = LinearLayout.VERTICAL
+    col.setPadding(dp(14), 0, 0, 0)
+    val t = tv(title, 17f, Pal.FG)
+    t.typeface = Typeface.DEFAULT_BOLD
+    t.maxLines = 2
+    t.ellipsize = android.text.TextUtils.TruncateAt.END
+    col.addView(t)
+    if (badges.isNotEmpty()) {
+        val fl = FlowRow(this, dp(6), dp(6))
+        fl.setPadding(0, dp(6), 0, dp(6))
+        for ((b, c) in badges) fl.addView(badge(b, c))
+        col.addView(fl)
+    }
+    row.addView(col, LinearLayout.LayoutParams(0, WRAP, 1f))
+    return Pair(row, col)
+}
+
 fun Activity.card(): LinearLayout {
     val c = LinearLayout(this)
     c.orientation = LinearLayout.VERTICAL

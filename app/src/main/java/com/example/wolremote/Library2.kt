@@ -563,19 +563,11 @@ object LibraryUi5 {
                 a.runOnUiThread {
                     info.text = if (l.isEmpty()) "Rien en cours." else "Touche un titre pour reprendre sur la télévision, appui long pour le marquer comme vu."
                     for (x in l) {
-                        val row = LinearLayout(a); row.orientation = LinearLayout.HORIZONTAL
-                        row.setPadding(0, a.dp(8), 0, a.dp(8))
-                        val img = ImageView(a)
-                        img.scaleType = ImageView.ScaleType.CENTER_CROP
-                        img.setBackgroundColor(Pal.CARD2)
-                        row.addView(img, LinearLayout.LayoutParams(a.dp(96), a.dp(56)))
-                        Img.load(st.base(8096) + "/Items/" + x.id + "/Images/Primary?maxHeight=200&quality=80", img)
-                        val t = LinearLayout(a); t.orientation = LinearLayout.VERTICAL
-                        t.setPadding(a.dp(12), 0, 0, 0)
-                        t.addView(a.tv(x.title, 15f, Pal.FG))
                         val left = ((x.runTicks - x.posTicks) / 600000000L).toInt()
-                        t.addView(a.tv("reste " + (if (left >= 60) (left / 60).toString() + " h " + (left % 60) + " min" else "$left min"), 13f, Pal.MUTED))
-                        row.addView(t, LinearLayout.LayoutParams(0, WRAP, 1f))
+                        val pct = if (x.runTicks > 0) (x.posTicks * 100 / x.runTicks).toInt() else 0
+                        val (row, tcol) = a.mediaCard(st.base(8096) + "/Items/" + x.id + "/Images/Primary?maxHeight=300&quality=80", 112, 64, x.title, emptyList())
+                        tcol.addView(a.progress(pct))
+                        tcol.addView(a.tv("$pct % vu  ·  reste " + (if (left >= 60) (left / 60).toString() + " h " + (left % 60) + " min" else "$left min"), 13f, Pal.MUTED))
                         row.setOnClickListener { RemoteUi.playOn(a, st, x.id, x.title, x.posTicks) }
                         row.setOnLongClickListener {
                             a.dialogBuilder().setMessage("Marquer « " + x.title + " » comme vu ?")
@@ -610,7 +602,9 @@ object LibraryUi5 {
                         body.addView(a.section(s.name))
                         for (m in s.missing) {
                             val row = a.tv(m.title, 15f, Pal.FG)
-                            row.setPadding(0, a.dp(10), 0, a.dp(10))
+                            row.setPadding(a.dp(14), a.dp(14), a.dp(14), a.dp(14))
+                            row.background = a.rounded(Pal.CARD, 14, Pal.BORDER)
+                            row.layoutParams = LinearLayout.LayoutParams(MATCH, WRAP).also { it.topMargin = a.dp(8) }
                             row.setOnClickListener {
                                 row.text = m.title + "  ·  ajout…"
                                 row.setOnClickListener(null)
