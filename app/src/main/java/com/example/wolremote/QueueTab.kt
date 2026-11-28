@@ -22,6 +22,28 @@ class QueueTab(private val a: Activity, private val st: Settings, private val qb
         var qid = 0
         var port = 0
         var keyName = ""
+        var n = 1
+    }
+
+    // « 00:08:29 » ou « 1.02:00:00 » -> « 8 min »
+    private fun fmtLeft(t: String): String {
+        val m = Regex("^(?:(\\d+)\\.)?(\\d+):(\\d+):(\\d+)").find(t) ?: return t
+        val d = m.groupValues[1].toIntOrNull() ?: 0
+        val h = m.groupValues[2].toInt() + d * 24
+        val mi = m.groupValues[3].toInt()
+        return if (h > 0) "$h h ${mi} min" else if (mi > 0) "$mi min" else m.groupValues[4].toInt().toString() + " s"
+    }
+
+    private fun statusFr(s: String): String = when (s) {
+        "downloading" -> "Téléchargement"
+        "queued" -> "En file d'attente"
+        "paused" -> "En pause"
+        "completed" -> "Terminé"
+        "delay" -> "En attente"
+        "warning" -> "Attention"
+        "failed" -> "Échec"
+        "importPending", "importing" -> "Import"
+        else -> s
     }
 
     init {
@@ -58,7 +80,11 @@ class QueueTab(private val a: Activity, private val st: Settings, private val qb
                 val pct = if (size > 0) ((size - left) / size * 100).toInt() else 0
                 val tl = o.str("timeleft")
                 val status = o.str("status")
-                val it2 = Item(who, o.str("title"), pct, status + (if (tl.isNotEmpty()) " · reste $tl" else ""), o.str("downloadId").uppercase())
+                val did = o.str("downloadId").uppercase()
+                // Un pack de saison apparaît une fois par épisode dans Sonarr : on le regroupe
+                val dup = if (did.isNotEmpty()) items.firstOrNull { x -> x.hash == did && x.who == who } else null
+                if (dup != null) { dup.n++; continue }
+                val it2 = Item(who, o.str("title"), pct, statusFr(status) + (if (tl.isNotEmpty()) " · reste " + fmtLeft(tl) else ""), did)
                 it2.qid = o.optInt("id")
                 it2.port = port
                 it2.keyName = keyName
@@ -106,7 +132,7 @@ class QueueTab(private val a: Activity, private val st: Settings, private val qb
                 info.text = if (errs.isEmpty()) (if (items.isEmpty()) "Rien en téléchargement pour le moment.\nLes films et séries envoyés depuis Chercher apparaîtront ici." else "") else errs.joinToString("\n")
                 for (item in items) {
                     val c = a.card()
-                    val tt = a.tv(item.title, 15f, Pal.FG)
+                    val tt = a.tv(if (item.title.contains(' ')) item.title else item.title.replace('.', ' '), 15f, Pal.FG)
                     tt.typeface = android.graphics.Typeface.DEFAULT_BOLD
                     tt.maxLines = 2; tt.ellipsize = android.text.TextUtils.TruncateAt.END
                     c.addView(tt)
@@ -114,6 +140,7 @@ class QueueTab(private val a: Activity, private val st: Settings, private val qb
                     val fl = FlowRow(a, a.dp(6), a.dp(6))
                     fl.addView(a.badge(item.pct.toString() + " %", Pal.GREEN))
                     fl.addView(a.badge(item.who, if (item.who == "Radarr") Pal.AMBER else Pal.BLUE))
+                    if (item.n > 1) fl.addView(a.badge(item.n.toString() + " épisodes", Pal.PURPLE))
                     if (item.extra.isNotEmpty()) fl.addView(a.badge(item.extra, Pal.MUTED))
                     c.addView(fl)
                     if (item.hash.isNotEmpty() && qb.stalled.contains(item.hash)) {

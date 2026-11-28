@@ -228,19 +228,58 @@ object Shows {
     }
 
     // Ajoute la série à Sonarr (première saison surveillée) et lance la recherche ; null = OK
-    fun add(st: Settings, tvdb: Int): String? {
+    // Fiche Sonarr (lookup) d'une série ; id > 0 si elle est déjà suivie
+    fun lookup(st: Settings, tvdb: Int): JSONObject {
+        val key = st.get("kSonarr")
+        if (key.isEmpty()) throw Exception("clé Sonarr manquante")
+        val lk = Net.call("GET", st.base(8989) + "/api/v3/series/lookup?term=tvdb:$tvdb", key, timeout = 30000)
+        if (!lk.ok) throw Exception("introuvable (" + lk.code + ")")
+        return JSONArray(lk.body).optJSONObject(0) ?: throw Exception("introuvable dans Sonarr")
+    }
+
+    fun seasonNumbers(o: JSONObject): List<Int> {
+        val a = o.optJSONArray("seasons") ?: return emptyList()
+        return (0 until a.length()).mapNotNull { a.optJSONObject(it)?.optInt("seasonNumber") }.filter { it > 0 }.sorted()
+    }
+
+    // Série déjà suivie : on surveille les saisons choisies et on lance leur recherche
+    private fun addSeasons(st: Settings, id: Int, seasons: List<Int>): String? {
+        val base = st.base(8989)
+        val key = st.get("kSonarr")
+        val g = Net.call("GET", "$base/api/v3/series/$id", key, timeout = 20000)
+        if (!g.ok) return "lecture refusée (" + g.code + ")"
+        val s = JSONObject(g.body)
+        val arr = s.optJSONArray("seasons") ?: JSONArray()
+        for (i in 0 until arr.length()) {
+            val x = arr.optJSONObject(i) ?: continue
+            if (seasons.contains(x.optInt("seasonNumber"))) x.put("monitored", true)
+        }
+        s.put("monitored", true)
+        val p = Net.call("PUT", "$base/api/v3/series/$id", key, s.toString(), 30000)
+        if (!p.ok) return "refusé (" + p.code + ") " + errMsg(p.body)
+        for (n in seasons) Net.call("POST", "$base/api/v3/command", key, JSONObject().put("name", "SeasonSearch").put("seriesId", id).put("seasonNumber", n).toString(), 20000)
+        return null
+    }
+
+    // seasons : saisons à télécharger (null = la première)
+    fun add(st: Settings, tvdb: Int, seasons: List<Int>? = null): String? {
         val base = st.base(8989)
         val key = st.get("kSonarr")
         if (key.isEmpty()) return "clé Sonarr manquante"
         val lk = Net.call("GET", "$base/api/v3/series/lookup?term=tvdb:$tvdb", key, timeout = 30000)
         if (!lk.ok) return "introuvable (" + lk.code + ")"
         val first = JSONArray(lk.body).optJSONObject(0) ?: return "introuvable dans Sonarr"
+        if (seasons != null && first.optInt("id", 0) > 0) return addSeasons(st, first.optInt("id"), seasons)
         val pref = st.get("pSonarr").trim().toIntOrNull()
         val prof = pref ?: JSONArray(Net.call("GET", "$base/api/v3/qualityprofile", key).body).optJSONObject(0)?.optInt("id") ?: return "aucun profil de qualité"
         val body = JSONObject(first.toString())
         body.remove("id")
         body.put("qualityProfileId", prof).put("rootFolderPath", "/data/media/series").put("seasonFolder", true).put("monitored", true)
-        body.put("addOptions", JSONObject().put("monitor", "firstSeason").put("searchForMissingEpisodes", true))
+        if (seasons != null) {
+            val arr = body.optJSONArray("seasons") ?: JSONArray()
+            for (i in 0 until arr.length()) { val x = arr.optJSONObject(i) ?: continue; x.put("monitored", seasons.contains(x.optInt("seasonNumber"))) }
+            body.put("addOptions", JSONObject().put("monitor", "unknown").put("searchForMissingEpisodes", true))
+        } else body.put("addOptions", JSONObject().put("monitor", "firstSeason").put("searchForMissingEpisodes", true))
         try {
             val lp = Net.call("GET", "$base/api/v3/languageprofile", key)
             if (lp.ok) { val la = JSONArray(lp.body); if (la.length() > 0) body.put("languageProfileId", la.getJSONObject(0).getInt("id")) }
@@ -359,12 +398,16 @@ object Tmdb {
     var lastHidden = 0
 
     // Série : TMDb → identifiant TVDB → ajout dans Sonarr
-    fun addTv(st: Settings, tmdb: Int): String? {
+    fun tvdbOf(st: Settings, tmdb: Int): Int {
         val r = Net.call("GET", "https://api.themoviedb.org/3/tv/$tmdb/external_ids?api_key=" + st.get("kTmdb").trim(), timeout = 15000)
-        if (!r.ok) return "TMDb : HTTP " + r.code
-        val tvdb = JSONObject(r.body).optInt("tvdb_id", 0)
+        if (!r.ok) throw Exception("TMDb : HTTP " + r.code)
+        return JSONObject(r.body).optInt("tvdb_id", 0)
+    }
+
+    fun addTv(st: Settings, tmdb: Int, seasons: List<Int>? = null): String? {
+        val tvdb = try { tvdbOf(st, tmdb) } catch (e: Exception) { return e.message }
         if (tvdb == 0) return "pas d'identifiant TVDB pour cette série"
-        return Shows.add(st, tvdb)
+        return Shows.add(st, tvdb, seasons)
     }
 }
 
@@ -456,12 +499,14 @@ object LibraryUi5 {
                 row.addView(t, LinearLayout.LayoutParams(0, WRAP, 1f))
                 row.setOnLongClickListener { state.maxLines = if (state.maxLines == 4) 40 else 4; true }
                 row.setOnClickListener {
-                    row.setOnClickListener(null)
                     state.maxLines = 4
-                    state.text = "Ajout…"
-                    thread {
-                        val err = try { if (o.optBoolean("tv")) Tmdb.addTv(st, o.optInt("tmdbId")) else if (isShow) Shows.add(st, o.optInt("tvdbId")) else Sagas.add(st, o.optInt("tmdbId")) } catch (e: Exception) { e.message ?: "erreur" }
-                        a.runOnUiThread { state.text = if (err == null) "Ajouté, recherche lancée." else "Échec : $err"; state.setTextColor(if (err == null) Pal.GREEN else Pal.RED) }
+                    fun finish(err: String?) = a.runOnUiThread { state.text = if (err == null) "Ajouté, recherche lancée." else "Échec : $err"; state.setTextColor(if (err == null) Pal.GREEN else Pal.RED); if (err == null) row.setOnClickListener(null) }
+                    if (o.optBoolean("tv") || isShow) {
+                        pickSeasons(a, st, o) { err -> state.post { state.text = "Ajout…" }; finish(err) }
+                    } else {
+                        row.setOnClickListener(null)
+                        state.text = "Ajout…"
+                        thread { finish(try { Sagas.add(st, o.optInt("tmdbId")) } catch (e: Exception) { e.message ?: "erreur" }) }
                     }
                 }
                 list.addView(row)
@@ -546,6 +591,57 @@ object LibraryUi5 {
     private fun dialog(a: Activity, title: String, body: LinearLayout) {
         body.setPadding(a.dp(16), a.dp(8), a.dp(16), a.dp(8))
         a.bigDialog(title, body)
+    }
+
+    // Choix des saisons à télécharger avant d'ajouter une série
+    private fun pickSeasons(a: Activity, st: Settings, o: JSONObject, done: (String?) -> Unit) {
+        val body = LinearLayout(a); body.orientation = LinearLayout.VERTICAL
+        body.setPadding(a.dp(20), a.dp(8), a.dp(20), a.dp(8))
+        val info = a.tv("Chargement des saisons…", 14f, Pal.MUTED)
+        body.addView(info)
+        val chips = FlowRow(a, a.dp(8), a.dp(8))
+        chips.setPadding(0, a.dp(10), 0, a.dp(10))
+        body.addView(chips)
+        val go = a.btn("Ajouter", Pal.BLUE, 48) {}
+        go.visibility = android.view.View.GONE
+        body.addView(go)
+        val d = a.dialogBuilder().setTitle(o.str("title")).setView(body).setNegativeButton("Annuler", null).show()
+        thread {
+            try {
+                val tvdb = if (o.has("tvdbId")) o.optInt("tvdbId") else Tmdb.tvdbOf(st, o.optInt("tmdbId"))
+                if (tvdb == 0) throw Exception("pas d'identifiant TVDB pour cette série")
+                val lk = Shows.lookup(st, tvdb)
+                val nums = Shows.seasonNumbers(lk)
+                a.runOnUiThread {
+                    if (nums.isEmpty()) { info.text = "Aucune saison connue pour l'instant."; return@runOnUiThread }
+                    val sel = linkedSetOf(nums.first())
+                    info.text = nums.size.toString() + " saison(s). Choisis celles à télécharger."
+                    fun chip(label: String, on: Boolean, click: () -> Unit): android.widget.TextView {
+                        val t = a.tv(label, 14f, if (on) android.graphics.Color.WHITE else Pal.MUTED)
+                        t.setPadding(a.dp(14), a.dp(8), a.dp(14), a.dp(8))
+                        t.background = a.rounded(if (on) Pal.BLUE else Pal.CARD, 20, if (on) Pal.BLUE else Pal.BORDER)
+                        t.setOnClickListener { click() }
+                        return t
+                    }
+                    fun render() {
+                        chips.removeAllViews()
+                        chips.addView(chip("Toutes", sel.size == nums.size) { sel.clear(); sel.addAll(nums); render() })
+                        chips.addView(chip("Dernière", sel.size == 1 && sel.first() == nums.last()) { sel.clear(); sel.add(nums.last()); render() })
+                        for (n in nums) chips.addView(chip("S$n", sel.contains(n)) { if (!sel.remove(n)) sel.add(n); if (sel.isEmpty()) sel.add(n); render() })
+                        go.text = "Ajouter " + (if (sel.size == nums.size) "toutes les saisons" else if (sel.size == 1) "la saison " + sel.first() else sel.size.toString() + " saisons")
+                    }
+                    render()
+                    go.visibility = android.view.View.VISIBLE
+                    go.setOnClickListener {
+                        d.dismiss()
+                        val chosen = sel.toList()
+                        thread { done(try { Shows.add(st, tvdb, chosen) } catch (e: Exception) { e.message ?: "erreur" }) }
+                    }
+                }
+            } catch (e: Exception) {
+                a.runOnUiThread { info.text = "Erreur : " + e.message }
+            }
+        }
     }
 
     fun resume(a: Activity, st: Settings) {
