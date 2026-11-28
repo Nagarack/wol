@@ -57,15 +57,16 @@ object Remote {
     }
 
     // Rallume la télé (Wake-on-LAN) ; null = envoyé
-    fun tvWake(st: Settings): String? {
+    // Renvoie (réussi, message de la tablette)
+    fun tvWake(st: Settings): Pair<Boolean, String> {
         val ip = st.get("kTvIp").trim()
-        if (ip.isEmpty()) return "Renseigne l'adresse IP de la télé dans Réglages."
+        if (ip.isEmpty()) return Pair(false, "Renseigne l'adresse IP de la télé dans Réglages.")
         return try {
-            val r = Net.call("POST", st.tablet() + "/tv/wake", json = JSONObject().put("pin", st.pin()).put("ip", ip).put("mac", st.get("kTvMac").trim()).toString(), timeout = 15000)
-            if (r.code == 404) "Mets à jour le serveur de la tablette (Réglages, Serveur)."
-            else if (!r.ok) "Tablette : HTTP " + r.code
-            else JSONObject(r.body).let { if (it.optBoolean("ok")) null else it.optString("message") }
-        } catch (e: Exception) { "Tablette injoignable" }
+            val r = Net.call("POST", st.tablet() + "/tv/wake", json = JSONObject().put("pin", st.pin()).put("ip", ip).put("mac", st.get("kTvMac").trim()).toString(), timeout = 40000)
+            if (r.code == 404) Pair(false, "Mets à jour le serveur de la tablette (Réglages, Serveur).")
+            else if (!r.ok) Pair(false, "Tablette : HTTP " + r.code + " " + errMsg(r.body))
+            else JSONObject(r.body).let { Pair(it.optBoolean("ok"), it.optString("message")) }
+        } catch (e: Exception) { Pair(false, "Tablette injoignable") }
     }
 
     fun commandArgs(st: Settings, id: String, name: String, args: JSONObject): Boolean =
@@ -158,7 +159,14 @@ object RemoteUi {
             return r
         }
         c.addView(row(
-            a.btn("Allumer", Pal.GREEN, 44) { send("Allumage") { Remote.tvWake(st) } },
+            a.btn("Allumer", Pal.GREEN, 44) {
+                msg.text = "Allumage… (jusqu'à 15 s)"
+                msg.setTextColor(Pal.MUTED)
+                thread {
+                    val (ok, m) = Remote.tvWake(st)
+                    a.runOnUiThread { msg.text = m; msg.setTextColor(if (ok) Pal.GREEN else Pal.RED) }
+                }
+            },
             a.btn2("Éteindre", Pal.RED, 44) {
                 a.dialogBuilder().setMessage("Éteindre la télévision ?").setPositiveButton("Éteindre") { _, _ -> keys("Extinction", "KEY_POWER")() }.setNegativeButton("Annuler", null).show()
             }))

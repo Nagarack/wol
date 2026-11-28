@@ -22,7 +22,7 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 # WOL_SERVER : ce fichier ne contient AUCUN secret. PIN, secret, MAC, IP... sont dans ~/wol_config.json
-VERSION = 6
+VERSION = 7
 UPDATE_BASE = "https://raw.githubusercontent.com/Nagarack/wol/main/server/"
 CONFIG_FILE = os.path.expanduser("~/wol_config.json")
 # ================= CONFIG (valeurs par défaut, surchargées par ~/wol_config.json) =================
@@ -196,27 +196,37 @@ def tv_info(ip):
 
 
 def tv_wake(ip, mac=""):
-    """Rallume la télé par Wake-on-LAN (option « Mise sous tension via réseau » de la télé)."""
+    """Rallume la télé : Wake-on-LAN, puis touche POWER si la télé répond en veille réseau."""
     if tv_info(ip) is not None:
         return True, "La télé est déjà allumée"
     toks = _tv_tokens()
     mac = (mac or toks.get("mac_" + ip, "")).strip()
     if not mac:
-        return False, "Adresse MAC inconnue : allume la télé une fois et utilise un bouton de volume pour l'enregistrer, ou saisis-la dans Réglages"
+        return False, "Adresse MAC inconnue : saisis-la dans Réglages (Télévision Samsung) ou allume la télé une fois et envoie une commande de volume"
     for _ in range(3):
         send_magic_packet(mac, BROADCAST)
         time.sleep(0.3)
-    return True, "Signal d'allumage envoyé (la télé doit avoir « Mise sous tension via réseau » activée)"
+    time.sleep(4)
+    if tv_info(ip) is not None:
+        return True, "La télé s'allume"
+    try:   # certaines télés en veille réseau répondent à la télécommande réseau
+        tv_keys(ip, ["KEY_POWER"], timeout=6)
+        time.sleep(4)
+        if tv_info(ip) is not None:
+            return True, "La télé s'allume"
+    except Exception:
+        pass
+    return False, f"Signal envoyé à {mac} mais la télé ne répond pas. Active « Mise sous tension via réseau » sur la télé ; si elle est en Ethernet, saisis son adresse MAC filaire (Réglages, Assistance, À propos de cette télé) dans l'app"
 
 
-def tv_keys(ip, keys, port=8002, use_ssl=True):
+def tv_keys(ip, keys, port=8002, use_ssl=True, timeout=None):
     """Envoie des touches de télécommande à une télé Samsung. Premier usage : accepter la demande sur la télé."""
     import base64
     toks = _tv_tokens()
     token = toks.get(ip, "")
     name = base64.b64encode(b"Mon PC").decode()
     path = "/api/v2/channels/samsung.remote.control?name=" + name + ("&token=" + token if token else "")
-    ws = _WS(ip, port, path, use_ssl, 35 if not token else 10)
+    ws = _WS(ip, port, path, use_ssl, timeout or (35 if not token else 10))
     try:
         while True:
             op, data = ws.read()
