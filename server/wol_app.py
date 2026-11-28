@@ -22,7 +22,7 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 # WOL_SERVER : ce fichier ne contient AUCUN secret. PIN, secret, MAC, IP... sont dans ~/wol_config.json
-VERSION = 8
+VERSION = 9
 UPDATE_BASE = "https://raw.githubusercontent.com/Nagarack/wol/main/server/"
 CONFIG_FILE = os.path.expanduser("~/wol_config.json")
 # ================= CONFIG (valeurs par défaut, surchargées par ~/wol_config.json) =================
@@ -70,7 +70,7 @@ def load_config():
 
 def self_update():
     """Télécharge la dernière version depuis GitHub, vérifie la syntaxe, remplace ce fichier (copie .bak)."""
-    with urllib.request.urlopen(UPDATE_BASE + "wol_app.py", timeout=30) as r:
+    with urllib.request.urlopen(UPDATE_BASE + "wol_app.py?t=" + str(int(time.time())), timeout=30) as r:
         code = r.read()
     if b"WOL_SERVER" not in code:
         raise ValueError("fichier inattendu")

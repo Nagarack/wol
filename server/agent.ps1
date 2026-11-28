@@ -1,7 +1,7 @@
 # WOL_AGENT
 # Agent : extinction + Chroniques (lancer / arreter / etat). Lance au demarrage, en SYSTEM.
 $cfg    = Get-Content "C:\wol\config.json" -Raw | ConvertFrom-Json
-$agentVersion = 8
+$agentVersion = 9
 $task   = "WOL Chroniques"
 $folder = "C:\Users\Baka\Desktop\Chroniques"
 # Programmes ouverts "sur" le dossier mais qui ne sont pas le serveur : ignores
@@ -87,7 +87,7 @@ while ($l.IsListening) {
             elseif ($path -eq "/self-update") {
                 try {
                     [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-                    $new = (Invoke-WebRequest -UseBasicParsing "https://raw.githubusercontent.com/Nagarack/wol/main/server/agent.ps1" -TimeoutSec 30).Content
+                    $new = (Invoke-WebRequest -UseBasicParsing "https://raw.githubusercontent.com/Nagarack/wol/main/server/agent.ps1?t=$([int](Get-Date -UFormat %s))" -TimeoutSec 30).Content
                     $tmp = "C:\wol\agent.ps1.new"
                     Set-Content -Path $tmp -Value $new -Encoding UTF8
                     $perr = $null

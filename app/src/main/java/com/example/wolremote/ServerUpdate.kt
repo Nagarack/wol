@@ -17,7 +17,7 @@ object ServerUpdate {
     } catch (e: Exception) { null }
 
     fun check(st: Settings): Status {
-        val latest = Net.call("GET", RAW + "VERSION", timeout = 10000).body.trim().toInt()
+        val latest = Net.call("GET", RAW + "VERSION?t=" + System.currentTimeMillis(), timeout = 10000).body.trim().toInt()
         return Status(latest, ver(st.tablet() + "/version"), ver(st.tablet() + "/agent-version"))
     }
 
