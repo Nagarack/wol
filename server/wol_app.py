@@ -22,7 +22,7 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 # WOL_SERVER : ce fichier ne contient AUCUN secret. PIN, secret, MAC, IP... sont dans ~/wol_config.json
-VERSION = 7
+VERSION = 8
 UPDATE_BASE = "https://raw.githubusercontent.com/Nagarack/wol/main/server/"
 CONFIG_FILE = os.path.expanduser("~/wol_config.json")
 # ================= CONFIG (valeurs par défaut, surchargées par ~/wol_config.json) =================
@@ -196,15 +196,22 @@ def tv_info(ip):
 
 
 def tv_wake(ip, mac=""):
-    """Rallume la télé : Wake-on-LAN, puis touche POWER si la télé répond en veille réseau."""
+    """Rallume la télé : Wake-on-LAN (sur toutes les adresses MAC connues), puis touche POWER si elle répond en veille réseau."""
     if tv_info(ip) is not None:
         return True, "La télé est déjà allumée"
     toks = _tv_tokens()
-    mac = (mac or toks.get("mac_" + ip, "")).strip()
-    if not mac:
+    macs = [mac.strip()] if mac.strip() else []
+    macs += [m for m in toks.get("macs_" + ip, []) if m not in macs]
+    if toks.get("mac_" + ip) and toks["mac_" + ip] not in macs:
+        macs.append(toks["mac_" + ip])
+    if not macs:
         return False, "Adresse MAC inconnue : saisis-la dans Réglages (Télévision Samsung) ou allume la télé une fois et envoie une commande de volume"
     for _ in range(3):
-        send_magic_packet(mac, BROADCAST)
+        for m in macs:
+            try:
+                send_magic_packet(m, BROADCAST)
+            except Exception:
+                pass
         time.sleep(0.3)
     time.sleep(4)
     if tv_info(ip) is not None:
@@ -216,11 +223,46 @@ def tv_wake(ip, mac=""):
             return True, "La télé s'allume"
     except Exception:
         pass
-    return False, f"Signal envoyé à {mac} mais la télé ne répond pas. Active « Mise sous tension via réseau » sur la télé ; si elle est en Ethernet, saisis son adresse MAC filaire (Réglages, Assistance, À propos de cette télé) dans l'app"
+    return False, "Signal envoyé à " + ", ".join(macs) + " mais la télé ne répond pas. Active « Mise sous tension via réseau » sur la télé (ou « Allumer avec mobile »)"
 
 
-def tv_keys(ip, keys, port=8002, use_ssl=True, timeout=None):
-    """Envoie des touches de télécommande à une télé Samsung. Premier usage : accepter la demande sur la télé."""
+def _arp_mac(ip):
+    """Adresse MAC réellement utilisée par la télé (filaire ou Wi-Fi), lue dans la table ARP de la tablette."""
+    try:
+        socket.create_connection((ip, 8001), timeout=2).close()   # remplit la table ARP
+    except Exception:
+        pass
+    for src in ("/proc/net/arp",):
+        try:
+            with open(src) as f:
+                for line in f.read().splitlines()[1:]:
+                    p = line.split()
+                    if len(p) >= 4 and p[0] == ip and p[3] != "00:00:00:00:00:00":
+                        return p[3]
+        except Exception:
+            pass
+    try:
+        out = subprocess.run(["ip", "neigh", "show", ip], capture_output=True, text=True, timeout=3).stdout.split()
+        if "lladdr" in out:
+            return out[out.index("lladdr") + 1]
+    except Exception:
+        pass
+    return ""
+
+
+def _remember_macs(ip):
+    macs = []
+    for m in (_arp_mac(ip), (tv_info(ip) or {}).get("wifiMac", "")):
+        if m and m.lower() not in [x.lower() for x in macs]:
+            macs.append(m)
+    toks = _tv_tokens()
+    if macs and toks.get("macs_" + ip) != macs:
+        toks["macs_" + ip] = macs
+        with open(TV_FILE, "w") as f:
+            json.dump(toks, f)
+
+
+def _tv_connect(ip, port, use_ssl, timeout):
     import base64
     toks = _tv_tokens()
     token = toks.get(ip, "")
@@ -243,19 +285,46 @@ def tv_keys(ip, keys, port=8002, use_ssl=True, timeout=None):
                 break
             if ev in ("ms.channel.timeOut", "ms.error"):
                 raise Exception("connexion refusée : accepte la demande sur la télé")
-        if port == 8002:   # retient l'adresse MAC pour pouvoir la rallumer plus tard
-            d = tv_info(ip) or {}
-            mac = d.get("wifiMac") or ""
-            toks = _tv_tokens()
-            if mac and toks.get("mac_" + ip) != mac:
-                toks["mac_" + ip] = mac
-                with open(TV_FILE, "w") as f:
-                    json.dump(toks, f)
-        for k in keys:
-            ws.send(json.dumps({"method": "ms.remote.control", "params": {"Cmd": "Click", "DataOfCmd": k, "Option": "false", "TypeOfRemote": "SendRemoteKey"}}))
-            time.sleep(0.25)
-    finally:
+    except Exception:
         ws.close()
+        raise
+    if port == 8002:
+        try:
+            _remember_macs(ip)
+        except Exception:
+            pass
+    ws.t = time.time()
+    return ws
+
+
+_tv_conn = {}
+_tv_lock = threading.Lock()
+
+
+def tv_keys(ip, keys, port=8002, use_ssl=True, timeout=None):
+    """Envoie des touches de télécommande à une télé Samsung (connexion gardée ouverte 45 s : navigation réactive).
+    Premier usage : accepter la demande qui s'affiche sur la télé."""
+    with _tv_lock:
+        for attempt in (0, 1):
+            ws = _tv_conn.get(ip)
+            if ws is not None and time.time() - ws.t > 45:
+                ws.close()
+                ws = None
+            try:
+                if ws is None:
+                    ws = _tv_connect(ip, port, use_ssl, timeout)
+                    _tv_conn[ip] = ws
+                for k in keys:
+                    ws.send(json.dumps({"method": "ms.remote.control", "params": {"Cmd": "Click", "DataOfCmd": k, "Option": "false", "TypeOfRemote": "SendRemoteKey"}}))
+                    time.sleep(0.12 if len(keys) > 1 else 0.02)
+                ws.t = time.time()
+                return
+            except Exception:
+                if ws is not None:
+                    ws.close()
+                _tv_conn.pop(ip, None)
+                if attempt == 1:
+                    raise
 
 
 # ---------------- Minuteur d'arrêt : télé / PC (tourne sur la tablette, même appli fermée) ----------------

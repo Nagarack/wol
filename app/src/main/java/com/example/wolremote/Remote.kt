@@ -173,6 +173,14 @@ object RemoteUi {
         c.addView(row(a.btn2("Vol −", Pal.FG, 44) { keys("Volume", "KEY_VOLDOWN")() }, a.btn2("Vol +", Pal.FG, 44) { keys("Volume", "KEY_VOLUP")() }, a.btn2("Muet", Pal.FG, 44) { keys("Muet", "KEY_MUTE")() }))
         c.addView(row(a.btn2("Vol −5", Pal.FG, 44) { keys("Volume", "KEY_VOLDOWN", "KEY_VOLDOWN", "KEY_VOLDOWN", "KEY_VOLDOWN", "KEY_VOLDOWN")() },
             a.btn2("Vol +5", Pal.FG, 44) { keys("Volume", "KEY_VOLUP", "KEY_VOLUP", "KEY_VOLUP", "KEY_VOLUP", "KEY_VOLUP")() }))
+        // Pavé de navigation : touches de la télécommande Samsung (menus, Smart Hub, sources)
+        fun k(label: String, key: String, h: Int = 48) = a.btn2(label, Pal.FG, h) { keys(label, key)() }
+        c.addView(a.tv("Navigation", 12f, Pal.MUTED).also { it.setPadding(0, a.dp(14), 0, 0) })
+        c.addView(row(k("Accueil", "KEY_HOME"), k("▲", "KEY_UP"), k("Retour", "KEY_RETURN")))
+        c.addView(row(k("◀", "KEY_LEFT"), k("OK", "KEY_ENTER"), k("▶", "KEY_RIGHT")))
+        c.addView(row(k("Source", "KEY_SOURCE"), k("▼", "KEY_DOWN"), k("Menu", "KEY_MENU")))
+        c.addView(row(k("⏪", "KEY_REWIND"), k("▶❚❚", "KEY_PLAY"), k("⏩", "KEY_FF")))
+        c.addView(row(k("Infos", "KEY_INFO"), k("Chaîne +", "KEY_CHUP"), k("Chaîne −", "KEY_CHDOWN")))
         msg.setPadding(0, a.dp(8), 0, 0)
         c.addView(msg)
         return c
