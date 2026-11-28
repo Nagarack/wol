@@ -81,6 +81,32 @@ object Sagas {
     }
 }
 
+// Retrait d'un film suivi : arrête ses téléchargements puis le retire de Radarr
+object MovieRemove {
+    fun run(st: Settings, tmdb: Int, deleteFiles: Boolean): String? {
+        val base = st.base(7878)
+        val key = st.get("kRadarr")
+        if (key.isEmpty()) return "clé Radarr manquante"
+        val lk = Net.call("GET", "$base/api/v3/movie/lookup/tmdb?tmdbId=$tmdb", key, timeout = 30000)
+        if (!lk.ok) return "introuvable (" + lk.code + ")"
+        val id = JSONObject(lk.body).optInt("id", 0)
+        if (id == 0) return "film non suivi"
+        try {
+            val q = Net.call("GET", "$base/api/v3/queue?pageSize=200", key, timeout = 15000)
+            if (q.ok) {
+                val t = q.body.trim()
+                val arr = if (t.startsWith("[")) JSONArray(t) else (JSONObject(t).optJSONArray("records") ?: JSONArray())
+                for (i in 0 until arr.length()) {
+                    val o = arr.optJSONObject(i) ?: continue
+                    if (o.optInt("movieId") == id) Net.call("DELETE", base + "/api/v3/queue/" + o.optInt("id") + "?removeFromClient=true&blocklist=false", key, timeout = 15000)
+                }
+            }
+        } catch (e: Exception) { }
+        val r = Net.call("DELETE", "$base/api/v3/movie/$id?deleteFiles=$deleteFiles&addImportListExclusion=false", key, timeout = 30000)
+        return if (r.ok) null else "refusé (" + r.code + ") " + errMsg(r.body)
+    }
+}
+
 object Discover {
     // Listes TMDb créées dans Radarr : libellé → type TMDb (0 populaires, 1 mieux notés, 2 au cinéma, 3 à venir)
     val KINDS = listOf("Populaires" to 0, "Au cinéma" to 2, "À venir" to 3, "Mieux notés" to 1)
@@ -485,7 +511,7 @@ object LibraryUi5 {
             lastL = l0
             val l = sorted(l0)
             list.removeAllViews()
-            info.text = if (l.isEmpty()) "Rien pour l'instant. " + (if (mode == "films" && !Tmdb.has(st)) Discover.lastInfo else "Réessaie dans une minute.") else "Touche un titre pour l'ajouter et lancer son téléchargement (séries : choix des saisons, ou ne plus suivre). Appui long : résumé complet." + (if (Tmdb.has(st)) (if (Tmdb.lastHidden > 0) "\n" + Tmdb.lastHidden + " déjà dans ta bibliothèque, masqué(s)." else "") else if (mode == "films") "\n\n" + Discover.lastInfo else "")
+            info.text = if (l.isEmpty()) "Rien pour l'instant. " + (if (mode == "films" && !Tmdb.has(st)) Discover.lastInfo else "Réessaie dans une minute.") else "Touche un titre pour l'ajouter et lancer son téléchargement (déjà ajouté : relancer ou ne plus suivre). Appui long : résumé complet." + (if (Tmdb.has(st)) (if (Tmdb.lastHidden > 0) "\n" + Tmdb.lastHidden + " déjà dans ta bibliothèque, masqué(s)." else "") else if (mode == "films") "\n\n" + Discover.lastInfo else "")
             for (o in l) {
                 val isShow = o.has("tvdbId")
                 val row = LinearLayout(a); row.orientation = LinearLayout.HORIZONTAL
@@ -524,16 +550,41 @@ object LibraryUi5 {
                     state.maxLines = 4
                     val isTv = o.optBoolean("tv") || isShow
                     fun finish(err: String?) = a.runOnUiThread {
-                        state.text = if (err == null) "Ajouté, recherche lancée. Touche pour ajuster ou ne plus suivre." else if (err.isEmpty()) "Série retirée de Sonarr." else if (err.startsWith("Échec")) err else "Échec : $err"
+                        state.text = if (err == null) "Ajouté, recherche lancée. Touche à nouveau pour " + (if (isTv) "ajuster ou ne plus suivre." else "relancer ou ne plus suivre.") else if (err.isEmpty()) if (isTv) "Série retirée de Sonarr." else "Film retiré de Radarr." else if (err.startsWith("Échec")) err else "Échec : $err"
                         state.setTextColor(if (err == null || err.isEmpty()) Pal.GREEN else Pal.RED)
-                        if (!isTv && err == null) row.setOnClickListener(null)
+                        
                     }
                     if (isTv) {
                         pickSeasons(a, st, o) { err -> state.post { state.text = "Mise à jour…" }; finish(err) }
                     } else {
-                        row.setOnClickListener(null)
-                        state.text = "Ajout…"
-                        thread { finish(try { Sagas.add(st, o.optInt("tmdbId")) } catch (e: Exception) { e.message ?: "erreur" }) }
+                        val tmdb = o.optInt("tmdbId")
+                        fun addIt() {
+                            state.text = "Ajout…"
+                            thread {
+                                val err = try { Sagas.add(st, tmdb) } catch (e: Exception) { e.message ?: "erreur" }
+                                if (err == null) o.put("track", true)
+                                finish(err)
+                            }
+                        }
+                        fun removeIt(files: Boolean) {
+                            state.text = "Retrait…"
+                            thread {
+                                val err = try { MovieRemove.run(st, tmdb, files) } catch (e: Exception) { e.message ?: "erreur" }
+                                if (err == null) o.put("track", false)
+                                finish(err ?: "")
+                            }
+                        }
+                        if (o.optBoolean("track")) {
+                            a.dialogBuilder().setTitle(o.str("title")).setMessage("Ce film est déjà suivi dans Radarr.")
+                                .setPositiveButton("Relancer la recherche") { _, _ -> addIt() }
+                                .setNeutralButton("Ne plus suivre") { _, _ ->
+                                    a.dialogBuilder().setTitle("Ne plus suivre ?").setMessage("Les téléchargements en cours sont arrêtés. Que faire du fichier déjà téléchargé ?")
+                                        .setPositiveButton("Garder le fichier") { _, _ -> removeIt(false) }
+                                        .setNeutralButton("Supprimer le fichier") { _, _ -> removeIt(true) }
+                                        .setNegativeButton("Annuler", null).show()
+                                }
+                                .setNegativeButton("Annuler", null).show()
+                        } else addIt()
                     }
                 }
                 list.addView(row)
