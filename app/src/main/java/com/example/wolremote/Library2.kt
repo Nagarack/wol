@@ -624,7 +624,13 @@ object LibraryUi5 {
                                         .setNegativeButton("Annuler", null).show()
                                 }
                                 .setNegativeButton("Annuler", null).show()
-                        } else addIt()
+                        } else {
+                            // Un simple appui ne lance plus de téléchargement : confirmation d'abord
+                            val ov = o.str("overview")
+                            a.dialogBuilder().setTitle(o.str("title")).setMessage((if (ov.isNotEmpty()) ov.take(400) + "\n\n" else "") + "Ajouter ce film à Radarr et lancer le téléchargement ?")
+                                .setPositiveButton("Télécharger") { _, _ -> addIt() }
+                                .setNegativeButton("Annuler", null).show()
+                        }
                     }
                 }
                 list.addView(row)
