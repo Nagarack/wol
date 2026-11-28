@@ -22,7 +22,7 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 # WOL_SERVER : ce fichier ne contient AUCUN secret. PIN, secret, MAC, IP... sont dans ~/wol_config.json
-VERSION = 2
+VERSION = 3
 UPDATE_BASE = "https://raw.githubusercontent.com/Nagarack/wol/main/server/"
 CONFIG_FILE = os.path.expanduser("~/wol_config.json")
 # ================= CONFIG (valeurs par défaut, surchargées par ~/wol_config.json) =================
@@ -253,8 +253,12 @@ def meter_loop():
                     dk = datetime.date.today().isoformat()
                     hd[dk] = hd.get(dk, 0.0) + dt / 3600.0
             elif energy.get("sess_start"):
-                energy["last_sess"] = {"end": nowt, "secs": max(0, nowt - energy["sess_start"])}
+                rec = {"start": energy["sess_start"], "end": nowt, "secs": max(0, nowt - energy["sess_start"]), "wh": round(energy.get("sess_wh", 0.0), 1)}
+                energy["last_sess"] = rec
+                energy.setdefault("sessions", []).append(rec)
+                energy["sessions"] = energy["sessions"][-40:]
                 energy["sess_start"] = None
+                energy["sess_wh"] = 0.0
         if time.time() - saved > 60:
             try:
                 with _lock, open(METER_FILE, "w") as f:
@@ -274,6 +278,8 @@ def meter_loop():
                 day = datetime.date.today().isoformat()
                 with _lock:
                     energy["days"][day] = energy["days"].get(day, 0.0) + total * (now - last) / 3600.0
+                    if energy.get("sess_start"):
+                        energy["sess_wh"] = energy.get("sess_wh", 0.0) + total * (now - last) / 3600.0
             last = now
             disk = max(s["disks"], key=lambda x: x[1]) if s["disks"] else None
             power_state = {"ok": True, "online": True, "watts": round(total), "cpu": round(s["cpu"]),
@@ -303,8 +309,13 @@ def power_report():
         ss = energy.get("sess_start")
         ls = energy.get("last_sess")
         hrs = dict(energy.get("hours", {}))
+        swh = energy.get("sess_wh", 0.0)
+        slist = list(energy.get("sessions", []))[-12:]
     r["session_s"] = int(time.time() - ss) if ss else None
     r["last_sess_s"] = int(ls["secs"]) if ls else None
+    r["session_wh"] = round(swh, 1) if ss else None
+    r["last_sess_wh"] = ls.get("wh") if ls else None
+    r["sessions"] = [[int(x["start"]), int(x["secs"]), x.get("wh", 0.0)] for x in reversed(slist)]
     r["hours_today"] = round(hrs.get(today.isoformat(), 0.0), 2)
     r["hours_month"] = round(sum(v for k, v in hrs.items() if k.startswith(month)), 1)
     hist = []

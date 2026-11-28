@@ -98,8 +98,17 @@ class QbTab(private val a: Activity, private val st: Settings, private val clien
         else -> s
     }
 
+    private fun title2(t: String): android.widget.TextView {
+        val v = a.tv(t, 15f, Pal.FG)
+        v.typeface = android.graphics.Typeface.DEFAULT_BOLD
+        v.maxLines = 2
+        v.ellipsize = android.text.TextUtils.TruncateAt.END
+        return v
+    }
+
+    // Boutons d'action discrets : contour, couleur du texte selon l'action
     private fun small(label: String, color: Int, onClick: () -> Unit): Button {
-        val b = a.btn(label, color, 40, onClick)
+        val b = a.btn2(label, if (color == Pal.GRAY) Pal.FG else color, 40, onClick)
         b.textSize = 13f
         return b
     }
@@ -159,8 +168,10 @@ class QbTab(private val a: Activity, private val st: Settings, private val clien
         act.sortByDescending { it.optLong("dlspeed", 0L) }
         done.sortByDescending { it.optLong("completion_on", 0L) }
 
-        summary.addView(a.tv(act.size.toString() + " en cours  ·  " + done.size + " terminés", 17f, Pal.FG))
-        summary.addView(a.tv("↓ " + fmtSpeed(dl) + "    ↑ " + fmtSpeed(up), 14f, Pal.MUTED))
+        val sp = a.tv("↓ " + fmtSpeed(dl) + "     ↑ " + fmtSpeed(up), 22f, Pal.FG)
+        sp.typeface = android.graphics.Typeface.DEFAULT_BOLD
+        summary.addView(sp)
+        summary.addView(a.tv(act.size.toString() + " en cours  ·  " + done.size + " terminés", 13f, Pal.MUTED))
         summary.addView(row(
             small("Tout pause", Pal.GRAY) { doIt("Tout est en pause") { client.pause("all") } },
             small("Tout reprendre", Pal.GREEN) { doIt("Tout reprend") { client.resume("all") } },
@@ -171,13 +182,16 @@ class QbTab(private val a: Activity, private val st: Settings, private val clien
         if (act.isEmpty()) listActive.addView(a.tv("Aucun téléchargement en cours.", 14f, Pal.MUTED))
         for (o in act) {
             val c = a.card()
-            c.addView(a.tv(o.str("name"), 14f, Pal.FG))
+            c.addView(title2(o.str("name")))
             val pct = (o.optDouble("progress", 0.0) * 100).toInt()
             c.addView(a.progress(pct))
-            val line = pct.toString() + " % · " + fmtSize(o.optLong("size", 0L)) + " · " +
-                fmtSpeed(o.optLong("dlspeed", 0L)) + " · reste " + fmtEta(o.optLong("eta", 8640000L)) +
-                " · " + stateFr(o.str("state"))
-            c.addView(a.tv(line, 12f, Pal.MUTED))
+            val fl = FlowRow(a, a.dp(6), a.dp(6))
+            fl.addView(a.badge("$pct %", Pal.GREEN))
+            fl.addView(a.badge(fmtSize(o.optLong("size", 0L)), Pal.MUTED))
+            if (o.optLong("dlspeed", 0L) > 0) fl.addView(a.badge(fmtSpeed(o.optLong("dlspeed", 0L)), Pal.BLUE))
+            if (o.optLong("eta", 8640000L) < 8640000L) fl.addView(a.badge("reste " + fmtEta(o.optLong("eta", 8640000L)), Pal.MUTED))
+            fl.addView(a.badge(stateFr(o.str("state")), Pal.MUTED))
+            c.addView(fl)
             val hash = o.str("hash")
             val name = o.str("name")
             val paused = o.str("state").let { it.startsWith("paused") || it.startsWith("stopped") }
@@ -199,13 +213,14 @@ class QbTab(private val a: Activity, private val st: Settings, private val clien
         val fmt = SimpleDateFormat("dd/MM HH:mm", Locale.FRANCE)
         for (o in done.take(30)) {
             val c = a.card()
-            c.addView(a.tv(o.str("name"), 14f, Pal.FG))
+            c.addView(title2(o.str("name")))
             val t = o.optLong("completion_on", 0L)
             val cat = o.str("category")
-            val line = fmtSize(o.optLong("size", 0L)) +
-                (if (t > 0L) " · terminé le " + fmt.format(Date(t * 1000L)) else "") +
-                (if (cat.isNotEmpty()) " · $cat" else "")
-            c.addView(a.tv(line, 12f, Pal.MUTED))
+            val fl = FlowRow(a, a.dp(6), a.dp(6))
+            fl.addView(a.badge(fmtSize(o.optLong("size", 0L)), Pal.MUTED))
+            if (t > 0L) fl.addView(a.badge(fmt.format(Date(t * 1000L)), Pal.MUTED))
+            if (cat.isNotEmpty()) fl.addView(a.badge(cat, Pal.BLUE))
+            c.addView(fl)
             listDone.addView(c)
         }
         if (done.size > 30) listDone.addView(a.tv("… et " + (done.size - 30) + " autres terminés.", 12f, Pal.MUTED))
