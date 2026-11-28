@@ -158,6 +158,8 @@ object RemoteUi {
         v.textSize = if (v.text.length > 7) 13f else if (v.text.length > 3) 12f else 15f
         v.setPadding(v.context.resources.displayMetrics.density.let { (4 * it).toInt() }, v.paddingTop, (4 * v.context.resources.displayMetrics.density).toInt(), v.paddingBottom)
         v.gravity = android.view.Gravity.CENTER
+        v.includeFontPadding = false
+        v.setPadding(v.paddingLeft, 0, v.paddingRight, 0)
     }
 
     // Les touches de la télé partent dans l'ordre, une à la fois ; si l'envoi prend du retard on abandonne les plus anciennes
@@ -190,7 +192,7 @@ object RemoteUi {
         fun row(vararg b: android.widget.Button): LinearLayout {
             val r = LinearLayout(a)
             r.orientation = LinearLayout.HORIZONTAL
-            for (v in b) { compact(v); v.layoutParams = LinearLayout.LayoutParams(0, WRAP, 1f).also { it.leftMargin = a.dp(3); it.rightMargin = a.dp(3); it.topMargin = a.dp(8) }; r.addView(v) }
+            for (v in b) { compact(v); v.layoutParams = LinearLayout.LayoutParams(0, v.minimumHeight, 1f).also { it.leftMargin = a.dp(3); it.rightMargin = a.dp(3); it.topMargin = a.dp(8) }; r.addView(v) }
             return r
         }
         // Touche avec retour tactile immédiat ; maintenue, elle se répète (volume, flèches)
@@ -295,7 +297,7 @@ object RemoteUi {
             r.orientation = LinearLayout.HORIZONTAL
             for (v in b) {
                 compact(v)
-                val lp = LinearLayout.LayoutParams(0, WRAP, 1f)
+                val lp = LinearLayout.LayoutParams(0, v.minimumHeight, 1f)
                 lp.leftMargin = a.dp(3); lp.rightMargin = a.dp(3); lp.topMargin = a.dp(8)
                 v.layoutParams = lp
                 r.addView(v)
