@@ -261,6 +261,27 @@ object Shows {
         return null
     }
 
+    // Ne plus suivre : retire les téléchargements en cours de la série, puis la série de Sonarr
+    fun remove(st: Settings, tvdb: Int, deleteFiles: Boolean): String? {
+        val base = st.base(8989)
+        val key = st.get("kSonarr")
+        val id = lookup(st, tvdb).optInt("id", 0)
+        if (id == 0) return "série non suivie"
+        try {
+            val q = Net.call("GET", "$base/api/v3/queue?pageSize=200", key, timeout = 15000)
+            if (q.ok) {
+                val t = q.body.trim()
+                val arr = if (t.startsWith("[")) JSONArray(t) else (JSONObject(t).optJSONArray("records") ?: JSONArray())
+                for (i in 0 until arr.length()) {
+                    val o = arr.optJSONObject(i) ?: continue
+                    if (o.optInt("seriesId") == id) Net.call("DELETE", base + "/api/v3/queue/" + o.optInt("id") + "?removeFromClient=true&blocklist=false", key, timeout = 15000)
+                }
+            }
+        } catch (e: Exception) { }
+        val r = Net.call("DELETE", "$base/api/v3/series/$id?deleteFiles=$deleteFiles&addImportListExclusion=false", key, timeout = 30000)
+        return if (r.ok) null else "refusé (" + r.code + ") " + errMsg(r.body)
+    }
+
     // seasons : saisons à télécharger (null = la première)
     fun add(st: Settings, tvdb: Int, seasons: List<Int>? = null): String? {
         val base = st.base(8989)
@@ -345,7 +366,8 @@ object Tmdb {
                 for (i in 0 until a.length()) {
                     val o = a.optJSONObject(i) ?: continue
                     val id = o.optInt("tmdbId")
-                    if (!tv && !o.optBoolean("hasFile")) tracked.add(id) else have.add(id)
+                    val files = if (tv) (o.optJSONObject("statistics")?.optInt("episodeFileCount", 0) ?: 0) > 0 else o.optBoolean("hasFile")
+                    if (!files) tracked.add(id) else have.add(id)
                 }
             }
         }
@@ -463,7 +485,7 @@ object LibraryUi5 {
             lastL = l0
             val l = sorted(l0)
             list.removeAllViews()
-            info.text = if (l.isEmpty()) "Rien pour l'instant. " + (if (mode == "films" && !Tmdb.has(st)) Discover.lastInfo else "Réessaie dans une minute.") else "Touche un titre pour l'ajouter et lancer son téléchargement. Appui long : résumé complet." + (if (Tmdb.has(st)) (if (Tmdb.lastHidden > 0) "\n" + Tmdb.lastHidden + " déjà dans ta bibliothèque, masqué(s)." else "") else if (mode == "films") "\n\n" + Discover.lastInfo else "")
+            info.text = if (l.isEmpty()) "Rien pour l'instant. " + (if (mode == "films" && !Tmdb.has(st)) Discover.lastInfo else "Réessaie dans une minute.") else "Touche un titre pour l'ajouter et lancer son téléchargement (séries : choix des saisons, ou ne plus suivre). Appui long : résumé complet." + (if (Tmdb.has(st)) (if (Tmdb.lastHidden > 0) "\n" + Tmdb.lastHidden + " déjà dans ta bibliothèque, masqué(s)." else "") else if (mode == "films") "\n\n" + Discover.lastInfo else "")
             for (o in l) {
                 val isShow = o.has("tvdbId")
                 val row = LinearLayout(a); row.orientation = LinearLayout.HORIZONTAL
@@ -500,9 +522,14 @@ object LibraryUi5 {
                 row.setOnLongClickListener { state.maxLines = if (state.maxLines == 4) 40 else 4; true }
                 row.setOnClickListener {
                     state.maxLines = 4
-                    fun finish(err: String?) = a.runOnUiThread { state.text = if (err == null) "Ajouté, recherche lancée." else "Échec : $err"; state.setTextColor(if (err == null) Pal.GREEN else Pal.RED); if (err == null) row.setOnClickListener(null) }
-                    if (o.optBoolean("tv") || isShow) {
-                        pickSeasons(a, st, o) { err -> state.post { state.text = "Ajout…" }; finish(err) }
+                    val isTv = o.optBoolean("tv") || isShow
+                    fun finish(err: String?) = a.runOnUiThread {
+                        state.text = if (err == null) "Ajouté, recherche lancée. Touche pour ajuster ou ne plus suivre." else if (err.isEmpty()) "Série retirée de Sonarr." else if (err.startsWith("Échec")) err else "Échec : $err"
+                        state.setTextColor(if (err == null || err.isEmpty()) Pal.GREEN else Pal.RED)
+                        if (!isTv && err == null) row.setOnClickListener(null)
+                    }
+                    if (isTv) {
+                        pickSeasons(a, st, o) { err -> state.post { state.text = "Mise à jour…" }; finish(err) }
                     } else {
                         row.setOnClickListener(null)
                         state.text = "Ajout…"
@@ -612,10 +639,20 @@ object LibraryUi5 {
                 if (tvdb == 0) throw Exception("pas d'identifiant TVDB pour cette série")
                 val lk = Shows.lookup(st, tvdb)
                 val nums = Shows.seasonNumbers(lk)
+                val tracked = lk.optInt("id", 0) > 0
                 a.runOnUiThread {
+                    if (tracked) {
+                        val rm = a.btn2("Ne plus suivre cette série", Pal.RED, 48) {
+                            a.dialogBuilder().setTitle("Ne plus suivre ?").setMessage("Les téléchargements en cours sont arrêtés. Que faire des fichiers déjà téléchargés ?")
+                                .setPositiveButton("Garder les fichiers") { _, _ -> d.dismiss(); thread { done(try { Shows.remove(st, tvdb, false)?.let { "Échec : $it" } ?: "" } catch (e: Exception) { "Échec : " + e.message }) } }
+                                .setNeutralButton("Supprimer les fichiers") { _, _ -> d.dismiss(); thread { done(try { Shows.remove(st, tvdb, true)?.let { "Échec : $it" } ?: "" } catch (e: Exception) { "Échec : " + e.message }) } }
+                                .setNegativeButton("Annuler", null).show()
+                        }
+                        body.addView(rm)
+                    }
                     if (nums.isEmpty()) { info.text = "Aucune saison connue pour l'instant."; return@runOnUiThread }
                     val sel = linkedSetOf(nums.first())
-                    info.text = nums.size.toString() + " saison(s). Choisis celles à télécharger."
+                    info.text = nums.size.toString() + " saison(s)" + (if (tracked) ", série déjà suivie." else ".") + " Choisis celles à télécharger."
                     fun chip(label: String, on: Boolean, click: () -> Unit): android.widget.TextView {
                         val t = a.tv(label, 14f, if (on) android.graphics.Color.WHITE else Pal.MUTED)
                         t.setPadding(a.dp(14), a.dp(8), a.dp(14), a.dp(8))
