@@ -106,9 +106,16 @@ class QueueTab(private val a: Activity, private val st: Settings, private val qb
                 info.text = if (errs.isEmpty()) (if (items.isEmpty()) "Rien en téléchargement pour le moment.\nLes films et séries envoyés depuis Chercher apparaîtront ici." else "") else errs.joinToString("\n")
                 for (item in items) {
                     val c = a.card()
-                    c.addView(a.tv(item.title, 14f, Pal.FG))
+                    val tt = a.tv(item.title, 15f, Pal.FG)
+                    tt.typeface = android.graphics.Typeface.DEFAULT_BOLD
+                    tt.maxLines = 2; tt.ellipsize = android.text.TextUtils.TruncateAt.END
+                    c.addView(tt)
                     c.addView(a.progress(item.pct))
-                    c.addView(a.tv(item.who + " · " + item.pct + " % · " + item.extra, 12f, Pal.MUTED))
+                    val fl = FlowRow(a, a.dp(6), a.dp(6))
+                    fl.addView(a.badge(item.pct.toString() + " %", Pal.GREEN))
+                    fl.addView(a.badge(item.who, if (item.who == "Radarr") Pal.AMBER else Pal.BLUE))
+                    if (item.extra.isNotEmpty()) fl.addView(a.badge(item.extra, Pal.MUTED))
+                    c.addView(fl)
                     if (item.hash.isNotEmpty() && qb.stalled.contains(item.hash)) {
                         c.addView(a.tv("Bloqué depuis plus de 30 min", 13f, Pal.RED))
                         c.addView(a.btn2("Retirer et chercher autre chose", Pal.FG, 44) {

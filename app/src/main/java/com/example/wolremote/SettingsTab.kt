@@ -25,142 +25,189 @@ class SettingsTab(private val a: Activity, private val st: Settings) {
         view.addView(root)
         var col = root
         val bodies = ArrayList<LinearLayout>()
-        // Chaque rubrique est un groupe repliable : l'écran reste court
         val refreshers = ArrayList<() -> Unit>()
-        fun grp(title: String, vararg keys: String) {
+        fun refreshAll() = refreshers.forEach { it() }
+
+        // Chaque rubrique est une carte repliable avec son état en sous-titre
+        fun grp(title: String, keys: List<String> = emptyList(), status: (() -> Pair<String, Int>)? = null) {
+            val card = LinearLayout(a)
+            card.orientation = LinearLayout.VERTICAL
+            card.background = a.rounded(Pal.CARD, 16, Pal.BORDER)
+            card.layoutParams = LinearLayout.LayoutParams(MATCH, WRAP).also { it.topMargin = a.dp(10) }
+            val head = LinearLayout(a)
+            head.orientation = LinearLayout.HORIZONTAL
+            head.gravity = android.view.Gravity.CENTER_VERTICAL
+            head.setPadding(a.dp(16), a.dp(14), a.dp(16), a.dp(14))
+            head.background = android.graphics.drawable.RippleDrawable(android.content.res.ColorStateList.valueOf(android.graphics.Color.argb(40, 255, 255, 255)), null, a.rounded(Pal.CARD, 16))
+            val tcol = LinearLayout(a)
+            tcol.orientation = LinearLayout.VERTICAL
+            val tt = a.tv(title, 16f, Pal.FG)
+            tt.typeface = android.graphics.Typeface.DEFAULT_BOLD
+            val subTv = a.tv("", 13f, Pal.MUTED)
+            tcol.addView(tt)
+            tcol.addView(subTv)
+            val mark = a.tv("+", 22f, Pal.MUTED)
+            head.addView(tcol, LinearLayout.LayoutParams(0, WRAP, 1f))
+            head.addView(mark)
             val body = LinearLayout(a)
             body.orientation = LinearLayout.VERTICAL
-            bodies.add(body)
-            val wrap = a.indented(body)
-            wrap.visibility = android.view.View.GONE
-            val head = a.rowItem(title, " ", "+") {}
-            a.boldHead(head)
-            val mark = head.getChildAt(1) as android.widget.TextView
-            val subTv = (head.getChildAt(0) as LinearLayout).getChildAt(1) as android.widget.TextView
+            body.setPadding(a.dp(16), 0, a.dp(16), a.dp(16))
+            body.visibility = android.view.View.GONE
+            card.addView(head)
+            card.addView(body)
             val upd: () -> Unit = {
-                val ks = keys.toList()
-                if (ks.isEmpty()) subTv.visibility = android.view.View.GONE
-                else {
-                    val n = ks.count { (fields[it]?.text?.toString() ?: st.get(it)).trim().isNotEmpty() }
-                    subTv.text = if (n == ks.size) "Renseigné" else if (n == 0) "À renseigner" else "$n / ${ks.size} renseignés"
-                    subTv.setTextColor(if (n == ks.size) Pal.GREEN else Pal.MUTED)
-                }
+                if (keys.isNotEmpty()) {
+                    val n = keys.count { (fields[it]?.text?.toString() ?: st.get(it)).trim().isNotEmpty() }
+                    subTv.text = if (n == keys.size) "Renseigné" else if (n == 0) "À renseigner" else "$n / ${keys.size} renseignés"
+                    subTv.setTextColor(if (n == keys.size) Pal.GREEN else Pal.MUTED)
+                } else if (status != null) {
+                    val (t, c) = status()
+                    subTv.text = t
+                    subTv.setTextColor(c)
+                } else subTv.visibility = android.view.View.GONE
             }
             refreshers.add(upd)
             upd()
             head.setOnClickListener {
-                val open = wrap.visibility == android.view.View.GONE
-                wrap.visibility = if (open) android.view.View.VISIBLE else android.view.View.GONE
+                val open = body.visibility == android.view.View.GONE
+                body.visibility = if (open) android.view.View.VISIBLE else android.view.View.GONE
                 mark.text = if (open) "−" else "+"
-                refreshers.forEach { it() }
+                refreshAll()
             }
-            root.addView(head)
-            root.addView(wrap)
+            root.addView(card)
+            bodies.add(body)
             col = body
         }
-        col.addView(a.title("Réglages"))
-        col.addView(a.tv("Tout est stocké uniquement sur ce téléphone. Les modifications sont enregistrées en quittant l'onglet.", 13f, Pal.MUTED))
-
+        fun heading(t: String) {
+            val h = a.section(t)
+            (h.layoutParams as? LinearLayout.LayoutParams)?.topMargin = a.dp(20)
+            root.addView(h)
+        }
+        fun note(t: String) {
+            val n = a.tv(t, 13f, Pal.MUTED)
+            n.setPadding(0, a.dp(2), 0, a.dp(4))
+            col.addView(n)
+        }
         fun add(label: String, key: String, type: Int) {
-            val l = a.tv(label, 13f, Pal.MUTED)
-            l.setPadding(0, a.dp(16), 0, 0)
+            val l = a.tv(label, 12f, Pal.MUTED)
+            l.setPadding(a.dp(2), a.dp(14), 0, 0)
             col.addView(l)
             val f = a.field("", st.get(key), type)
+            f.setOnFocusChangeListener { _, has -> if (!has) { saveAll(); refreshAll() } }
             fields[key] = f
             col.addView(f)
         }
+        // Interrupteur avec titre et explication ; onChange renvoie false pour refuser le changement
+        fun toggle(title: String, desc: String, on: Boolean, onChange: (Boolean) -> Boolean) {
+            val r = LinearLayout(a)
+            r.orientation = LinearLayout.HORIZONTAL
+            r.gravity = android.view.Gravity.CENTER_VERTICAL
+            r.setPadding(0, a.dp(14), 0, 0)
+            val t = LinearLayout(a)
+            t.orientation = LinearLayout.VERTICAL
+            t.addView(a.tv(title, 15f, Pal.FG))
+            if (desc.isNotEmpty()) t.addView(a.tv(desc, 12f, Pal.MUTED))
+            r.addView(t, LinearLayout.LayoutParams(0, WRAP, 1f))
+            val sw = android.widget.Switch(a)
+            sw.isChecked = on
+            sw.trackTintList = android.content.res.ColorStateList(arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()), intArrayOf(Pal.BLUE, Pal.BORDER))
+            sw.thumbTintList = android.content.res.ColorStateList.valueOf(android.graphics.Color.WHITE)
+            var guard = false
+            sw.setOnCheckedChangeListener { _, v ->
+                if (guard) return@setOnCheckedChangeListener
+                if (!onChange(v)) { guard = true; sw.isChecked = !v; guard = false }
+                refreshAll()
+            }
+            r.addView(sw)
+            col.addView(r)
+        }
+        fun action(label: String, primary: Boolean = false, f: () -> Unit) {
+            col.addView(if (primary) a.btn(label, Pal.BLUE, 48) { f() } else a.btn2(label, Pal.FG, 48) { f() })
+        }
+
+        col.addView(a.title("Réglages"))
+        col.addView(a.tv("Tout est enregistré automatiquement, uniquement sur ce téléphone.", 13f, Pal.MUTED))
+
         val uri = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
         val pw = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
         val num = InputType.TYPE_CLASS_NUMBER
 
-        grp("Wake-on-LAN", "url", "pin")
+        heading("Connexion")
+        grp("Wake-on-LAN", listOf("url", "pin"))
         add("Serveur Wake-on-LAN (tablette)", "url", uri)
         add("Code PIN", "pin", InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD)
-        grp("Accès au PC", "host", "host2")
-        add("PC : adresse sur le réseau local", "host", uri)
-        add("PC : adresse Tailscale (IP ou nom)", "host2", uri)
-        grp("Clés API", "kProwlarr", "kRadarr", "kSonarr", "kTmdb")
-        add("Clé API Prowlarr", "kProwlarr", pw)
-        add("Clé API Radarr", "kRadarr", pw)
-        add("Clé API Sonarr", "kSonarr", pw)
-        add("Clé API TMDb (facultative, pour Découvrir)", "kTmdb", pw)
-        grp("Qualité")
-        add("Profil de qualité Radarr (ID, vide = le premier)", "pRadarr", num)
-        add("Profil de qualité Sonarr (ID, vide = le premier)", "pSonarr", num)
-        grp("qBittorrent", "kQbUser", "kQbPass")
-        add("qBittorrent : port (8080 par défaut)", "pQb", num)
-        add("qBittorrent : utilisateur", "kQbUser", InputType.TYPE_CLASS_TEXT)
-        add("qBittorrent : mot de passe", "kQbPass", pw)
-        grp("Jellyfin", "kJellyfin")
-        add("Clé API Jellyfin (Tableau de bord, Clés API)", "kJellyfin", pw)
-        grp("Consommation", "kTarifKwh")
-        add("Prix du kWh en € (par défaut : tarif réglementé EDF Base)", "kTarifKwh", InputType.TYPE_CLASS_TEXT)
+        grp("Accès au PC", listOf("host", "host2"))
+        add("Adresse sur le réseau local", "host", uri)
+        add("Adresse Tailscale (IP ou nom)", "host2", uri)
 
-        col = root
-        col.addView(a.btn("Enregistrer", Pal.GREEN) {
-            saveAll()
-            Toast.makeText(a, "Réglages enregistrés", Toast.LENGTH_SHORT).show()
-        })
+        heading("Services")
+        grp("Clés API", listOf("kProwlarr", "kRadarr", "kSonarr", "kTmdb", "kJellyfin"))
+        add("Prowlarr", "kProwlarr", pw)
+        add("Radarr", "kRadarr", pw)
+        add("Sonarr", "kSonarr", pw)
+        add("Jellyfin (Tableau de bord, Clés API)", "kJellyfin", pw)
+        add("TMDb (facultative, pour Découvrir)", "kTmdb", pw)
+        grp("qBittorrent", listOf("kQbUser", "kQbPass"))
+        add("Port (8080 par défaut)", "pQb", num)
+        add("Utilisateur", "kQbUser", InputType.TYPE_CLASS_TEXT)
+        add("Mot de passe", "kQbPass", pw)
+        grp("Qualité", status = { Pair(if (st.get("pRadarr").isEmpty() && st.get("pSonarr").isEmpty()) "Profil par défaut" else "Personnalisée", Pal.MUTED) })
+        note("Identifiant du profil de qualité à utiliser. Vide : le premier profil.")
+        add("Profil Radarr (ID)", "pRadarr", num)
+        add("Profil Sonarr (ID)", "pSonarr", num)
+        grp("Consommation", status = { Pair((st.get("kTarifKwh").ifEmpty { "0,20" }) + " € / kWh", Pal.MUTED) })
+        add("Prix du kWh en € (par défaut : tarif EDF Base)", "kTarifKwh", InputType.TYPE_CLASS_TEXT)
 
-        grp("Notifications")
-        col.addView(a.tv("Prévient quand un téléchargement est terminé, même appli fermée, et actualise Jellyfin. Une notification discrète reste affichée tant que c'est actif.", 13f, Pal.MUTED))
-        val watch = a.btn("", Pal.BLUE) {}
-        fun label() { watch.text = if (st.get("kWatch") == "1") "Activées (touche pour désactiver)" else "Désactivées (touche pour activer)" }
-        label()
-        watch.setOnClickListener {
-            if (st.get("kWatch") == "1") {
-                st.put("kWatch", "0")
-                WatchService.stop(a)
-            } else {
+        heading("Automatisations")
+        grp("Notifications", status = { Pair(if (st.get("kWatch") == "1") "Activées" else "Désactivées", if (st.get("kWatch") == "1") Pal.GREEN else Pal.MUTED) })
+        note("Prévient quand un téléchargement est terminé, même appli fermée, et actualise Jellyfin. Une notification discrète reste affichée tant que c'est actif.")
+        toggle("Surveillance en arrière-plan", "", st.get("kWatch") == "1") { on ->
+            if (on) {
                 st.put("kWatch", "1")
                 if (Build.VERSION.SDK_INT >= 33 && a.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
                     a.requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 5)
                 }
                 saveAll()
                 WatchService.start(a)
+            } else {
+                st.put("kWatch", "0")
+                WatchService.stop(a)
             }
-            label()
+            true
         }
-        col.addView(watch)
-
-        grp("Maison")
-        col.addView(a.tv("Allume le PC quand ton téléphone rejoint le Wi-Fi de la maison, et te propose de l'éteindre quand tu en pars. Demande la surveillance en arrière-plan (Notifications).", 13f, Pal.MUTED))
-        col.addView(a.btn2("Définir le Wi-Fi actuel comme maison") {
+        grp("Maison", status = { Pair(if (st.get("kGeo") == "1") "Arrivée / départ activé" else if (st.get("kHomeGw").isNotEmpty()) "Wi-Fi défini" else "À configurer", if (st.get("kGeo") == "1") Pal.GREEN else Pal.MUTED) })
+        note("Allume le PC quand ton téléphone rejoint le Wi-Fi de la maison, et te propose de l'éteindre quand tu en pars. Demande la surveillance en arrière-plan.")
+        action("Définir le Wi-Fi actuel comme maison") {
             val g = wifiGateway(a)
             if (g.isEmpty()) Toast.makeText(a, "Connecte-toi d'abord au Wi-Fi de la maison", Toast.LENGTH_LONG).show()
-            else { st.put("kHomeGw", g); Toast.makeText(a, "Wi-Fi maison enregistré", Toast.LENGTH_SHORT).show() }
-        })
-        val geo = a.btn("", Pal.BLUE) {}
-        fun geoLabel() { geo.text = if (st.get("kGeo") == "1") "Arrivée / départ : activé" else "Arrivée / départ : désactivé" }
-        geoLabel()
-        geo.setOnClickListener {
-            if (st.get("kGeo") == "1") st.put("kGeo", "0")
-            else if (st.get("kHomeGw").isEmpty()) { Toast.makeText(a, "Définis d'abord le Wi-Fi maison", Toast.LENGTH_LONG).show(); return@setOnClickListener }
-            else { st.put("kGeo", "1"); st.put("kWatch", "1"); label() }
-            WatchService.stop(a)
-            if (st.get("kWatch") == "1" && st.get("kVac") != "1") WatchService.start(a)
-            geoLabel()
+            else { st.put("kHomeGw", g); refreshAll(); Toast.makeText(a, "Wi-Fi maison enregistré", Toast.LENGTH_SHORT).show() }
         }
-        col.addView(geo)
-
-        grp("Mode vacances")
-        col.addView(a.tv("Coupe la surveillance en arrière-plan et les alertes de la tablette (températures, disque, PC allumé la nuit).", 13f, Pal.MUTED))
-        val vacB = a.btn2("") {}
-        fun vacLabel() { vacB.text = if (st.get("kVac") == "1") "Mode vacances : activé" else "Mode vacances : désactivé" }
-        vacLabel()
-        vacB.setOnClickListener {
-            val on = st.get("kVac") != "1"
+        toggle("Arrivée / départ", "Allumer et éteindre selon le Wi-Fi", st.get("kGeo") == "1") { on ->
+            if (on && st.get("kHomeGw").isEmpty()) {
+                Toast.makeText(a, "Définis d'abord le Wi-Fi maison", Toast.LENGTH_LONG).show()
+                false
+            } else {
+                st.put("kGeo", if (on) "1" else "0")
+                if (on) st.put("kWatch", "1")
+                WatchService.stop(a)
+                if (st.get("kWatch") == "1" && st.get("kVac") != "1") WatchService.start(a)
+                true
+            }
+        }
+        grp("Mode vacances", status = { Pair(if (st.get("kVac") == "1") "Activé" else "Désactivé", if (st.get("kVac") == "1") Pal.AMBER else Pal.MUTED) })
+        note("Coupe la surveillance en arrière-plan et les alertes de la tablette (températures, disque, PC allumé la nuit).")
+        toggle("Mode vacances", "", st.get("kVac") == "1") { on ->
             st.put("kVac", if (on) "1" else "0")
             if (on) WatchService.stop(a) else if (st.get("kWatch") == "1") WatchService.start(a)
             thread {
                 try { Net.call("POST", st.tablet() + "/vacation", json = JSONObject().put("pin", st.pin()).put("on", on).toString(), timeout = 10000) } catch (e: Exception) { }
             }
-            vacLabel()
+            true
         }
-        col.addView(vacB)
 
-        grp("Serveur (tablette et PC)")
-        col.addView(a.tv("Met à jour le programme de la tablette et l'agent du PC depuis GitHub, sans copier de fichier.", 13f, Pal.MUTED))
+        heading("Maintenance")
+        grp("Serveur (tablette et PC)", status = { Pair("Mises à jour depuis GitHub", Pal.MUTED) })
+        note("Met à jour le programme de la tablette et l'agent du PC, sans copier de fichier.")
         val srv = a.tv("", 14f, Pal.FG)
         srv.setPadding(0, a.dp(10), 0, 0)
         col.addView(srv)
@@ -176,25 +223,25 @@ class SettingsTab(private val a: Activity, private val st: Settings) {
                 a.runOnUiThread { srv.text = t }
             }
         }
-        col.addView(a.btn2("Vérifier les versions") { checkSrv() })
-        col.addView(a.btn2("Mettre à jour la tablette") {
+        action("Vérifier les versions") { checkSrv() }
+        action("Mettre à jour la tablette") {
             srv.text = "Mise à jour de la tablette…"
             thread {
                 val m = ServerUpdate.updateTablet(st)
                 a.runOnUiThread { srv.text = m }
             }
-        })
-        col.addView(a.btn2("Mettre à jour l'agent du PC") {
+        }
+        action("Mettre à jour l'agent du PC") {
             srv.text = "Mise à jour de l'agent…"
             thread {
                 val m = ServerUpdate.updateAgent(st)
                 a.runOnUiThread { srv.text = m }
             }
-        })
+        }
 
-        grp("Sauvegarde")
-        col.addView(a.tv("Exporte tes réglages (clés API, PIN…) dans un fichier protégé par un mot de passe, pour les retrouver après une réinstallation.", 13f, Pal.MUTED))
-        col.addView(a.btn("Exporter mes réglages", Pal.GRAY) {
+        grp("Sauvegarde", status = { Pair("Fichier protégé par mot de passe", Pal.MUTED) })
+        note("Exporte tes réglages (clés API, PIN…) pour les retrouver après une réinstallation.")
+        action("Exporter mes réglages") {
             saveAll()
             askPass("Protège la sauvegarde par un mot de passe (à retenir).") { pass ->
                 pendingBytes = Backup.export(st, pass)
@@ -204,13 +251,13 @@ class SettingsTab(private val a: Activity, private val st: Settings) {
                 i.putExtra(Intent.EXTRA_TITLE, "monpc-reglages.bin")
                 a.startActivityForResult(i, 71)
             }
-        })
-        col.addView(a.btn("Importer des réglages", Pal.GRAY) {
+        }
+        action("Importer des réglages") {
             val i = Intent(Intent.ACTION_OPEN_DOCUMENT)
             i.addCategory(Intent.CATEGORY_OPENABLE)
             i.type = "*/*"
             a.startActivityForResult(i, 72)
-        })
+        }
         for (b in bodies) a.compactButtons(b)
     }
 
