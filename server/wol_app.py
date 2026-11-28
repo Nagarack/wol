@@ -22,7 +22,7 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 # WOL_SERVER : ce fichier ne contient AUCUN secret. PIN, secret, MAC, IP... sont dans ~/wol_config.json
-VERSION = 11
+VERSION = 12
 UPDATE_BASE = "https://raw.githubusercontent.com/Nagarack/wol/main/server/"
 CONFIG_FILE = os.path.expanduser("~/wol_config.json")
 # ================= CONFIG (valeurs par défaut, surchargées par ~/wol_config.json) =================
@@ -420,25 +420,36 @@ def sleep_status():
 
 
 def sleep_run(p):
+    """Ordre fixe : 1) arrêt de la lecture  2) fermeture de l'appli Jellyfin de la télé  3) extinction de la télé  4) écrans / extinction du PC."""
     key = p.get("key", "")
-    if "stop" in p["actions"] and key:
+    acts = p["actions"]
+    tvip = p.get("tv_ip", "")
+    if "stop" in acts and key:
         try:
             for x in jf_playing(key):
                 _jf(f"/Sessions/{x['sid']}/Playing/Stop", key, "POST")
         except Exception:
             pass
-    if "screens" in p["actions"] and "shutdown" not in p["actions"]:
+    if tvip and ("stop" in acts or "tv" in acts):
+        try:
+            time.sleep(2)
+            tv_close_app(tvip)
+            time.sleep(3)
+        except Exception:
+            pass
+    if "tv" in acts and tvip:
+        try:
+            tv_keys(tvip, ["KEY_POWER"])
+            time.sleep(4)
+        except Exception:
+            pass
+    if "screens" in acts and "shutdown" not in acts:
         try:
             req = urllib.request.Request(f"http://{PC_IP}:{AGENT_PORT}/screens/off", data=b"", method="POST", headers={"X-Secret": SECRET})
             urllib.request.urlopen(req, timeout=10).read()
         except Exception:
             pass
-    if "tv" in p["actions"] and p.get("tv_ip"):
-        try:
-            tv_keys(p["tv_ip"], ["KEY_POWER"])
-        except Exception:
-            pass
-    if "shutdown" in p["actions"]:
+    if "shutdown" in acts:
         try:
             remote_shutdown()
         except Exception:
