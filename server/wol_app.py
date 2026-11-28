@@ -22,7 +22,7 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 # WOL_SERVER : ce fichier ne contient AUCUN secret. PIN, secret, MAC, IP... sont dans ~/wol_config.json
-VERSION = 3
+VERSION = 4
 UPDATE_BASE = "https://raw.githubusercontent.com/Nagarack/wol/main/server/"
 CONFIG_FILE = os.path.expanduser("~/wol_config.json")
 # ================= CONFIG (valeurs par défaut, surchargées par ~/wol_config.json) =================
@@ -113,6 +113,160 @@ def remote_shutdown(path="/shutdown") -> None:
         headers={"X-Secret": SECRET},
     )
     urllib.request.urlopen(req, timeout=5).read()
+
+
+
+# ---------------- Minuteur d'arrêt : télé / PC (tourne sur la tablette, même appli fermée) ----------------
+SLEEP_FILE = os.path.expanduser("~/wol_sleep.json")
+sleep_plan = None          # plan actif (ou None)
+SLEEP_GRACE = 60           # secondes de préavis (notification) avant l'exécution
+
+
+def _jf(path, key, method="GET"):
+    req = urllib.request.Request(f"http://{PC_IP}:8096{path}", method=method, data=(b"" if method == "POST" else None),
+                                 headers={"X-Emby-Token": key, "Authorization": f'MediaBrowser Token="{key}"'})
+    raw = urllib.request.urlopen(req, timeout=6).read()
+    return json.loads(raw) if raw else None
+
+
+def jf_playing(key):
+    out = []
+    for x in _jf("/Sessions", key) or []:
+        it = x.get("NowPlayingItem")
+        if it:
+            out.append({"sid": x.get("Id"), "item": it.get("Id"), "paused": bool((x.get("PlayState") or {}).get("IsPaused"))})
+    return out
+
+
+def sleep_save():
+    try:
+        with open(SLEEP_FILE, "w") as f:
+            json.dump(sleep_plan, f)
+    except Exception:
+        pass
+
+
+def sleep_load():
+    global sleep_plan
+    try:
+        with open(SLEEP_FILE) as f:
+            sleep_plan = json.load(f)
+    except Exception:
+        sleep_plan = None
+
+
+def sleep_start(d):
+    global sleep_plan
+    mode = d.get("mode")
+    val = int(d.get("value") or 0)
+    now = time.time()
+    p = {"mode": mode, "value": val, "actions": [a for a in d.get("actions", []) if a in ("stop", "screens", "shutdown")],
+         "key": d.get("jf_key", ""), "created": now, "seen": [], "idle_since": None, "armed": False, "countdown": None}
+    if mode == "timer":
+        p["deadline"] = now + val * 60
+    sleep_plan = p
+    sleep_save()
+
+
+def sleep_status():
+    p = sleep_plan
+    if not p:
+        return {"active": False}
+    now = time.time()
+    r = {"active": True, "mode": p["mode"], "value": p["value"], "actions": p["actions"], "seen": len(p.get("seen", []))}
+    if p["mode"] == "timer":
+        r["remaining"] = max(0, int(p["deadline"] - now))
+    if p.get("countdown"):
+        r["countdown"] = max(0, int(p["countdown"] - now))
+    return r
+
+
+def sleep_run(p):
+    key = p.get("key", "")
+    if "stop" in p["actions"] and key:
+        try:
+            for x in jf_playing(key):
+                _jf(f"/Sessions/{x['sid']}/Playing/Stop", key, "POST")
+        except Exception:
+            pass
+    if "screens" in p["actions"] and "shutdown" not in p["actions"]:
+        try:
+            req = urllib.request.Request(f"http://{PC_IP}:{AGENT_PORT}/screens/off", data=b"", method="POST", headers={"X-Secret": SECRET})
+            urllib.request.urlopen(req, timeout=10).read()
+        except Exception:
+            pass
+    if "shutdown" in p["actions"]:
+        try:
+            remote_shutdown()
+        except Exception:
+            pass
+
+
+def sleep_loop():
+    global sleep_plan
+    sleep_load()
+    while True:
+        time.sleep(10)
+        p = sleep_plan
+        if not p:
+            continue
+        now = time.time()
+        try:
+            if p.get("countdown"):
+                if now >= p["countdown"]:
+                    sleep_plan = None
+                    sleep_save()
+                    sleep_run(p)
+                continue
+            if not is_online():
+                sleep_plan = None      # PC déjà éteint : rien à programmer
+                sleep_save()
+                continue
+            trigger = False
+            mode = p["mode"]
+            if mode == "timer":
+                trigger = now >= p["deadline"]
+            else:
+                try:
+                    play = jf_playing(p["key"]) if p.get("key") else []
+                except Exception:
+                    continue
+                active = [x for x in play if not x["paused"]]
+                if mode == "end":
+                    if play:
+                        p["armed"] = True
+                        p["idle_since"] = None
+                    elif p.get("armed"):
+                        p["idle_since"] = p.get("idle_since") or now
+                        trigger = now - p["idle_since"] >= 60
+                elif mode == "episodes":
+                    for x in play:
+                        if x["item"] not in p["seen"]:
+                            p["seen"].append(x["item"])
+                            if len(p["seen"]) > p["value"]:
+                                try:
+                                    _jf(f"/Sessions/{x['sid']}/Playing/Stop", p["key"], "POST")
+                                except Exception:
+                                    pass
+                                trigger = True
+                    if not play and len(p["seen"]) >= p["value"]:
+                        p["idle_since"] = p.get("idle_since") or now
+                        trigger = trigger or now - p["idle_since"] >= 60
+                    elif play:
+                        p["idle_since"] = None
+                elif mode == "idle":
+                    if active:
+                        p["idle_since"] = None
+                    else:
+                        p["idle_since"] = p.get("idle_since") or now
+                        trigger = now - p["idle_since"] >= p["value"] * 60
+                sleep_save()
+            if trigger:
+                p["countdown"] = now + SLEEP_GRACE
+                sleep_save()
+                notify("sleep", "Extinction programmée", f"Le PC va s'éteindre dans {SLEEP_GRACE} s. Ouvre l'appli pour annuler.", "zzz", cooldown=0)
+        except Exception:
+            pass
 
 
 # ---------------- Compteur de consommation + alertes (tourne en continu sur la tablette) ----------------
@@ -427,6 +581,8 @@ class WebHandler(BaseHTTPRequestHandler):
             return self._json(200, {"online": is_online()})
         if self.path == "/power":
             return self._json(200, power_report())
+        if self.path == "/sleep/status":
+            return self._json(200, sleep_status())
         if self.path == "/consume-wake":  # appelé par le PC au démarrage
             global last_wake
             if self.headers.get("X-Secret") != SECRET:
@@ -463,7 +619,7 @@ class WebHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_POST(self):
-        global last_wake, vacation
+        global last_wake, vacation, sleep_plan
         length = int(self.headers.get("Content-Length", 0))
         try:
             data = json.loads(self.rfile.read(length) or b"{}")
@@ -504,6 +660,15 @@ class WebHandler(BaseHTTPRequestHandler):
                 elif os.path.exists(VAC_FILE):
                     os.remove(VAC_FILE)
                 return self._json(200, {"message": "Mode vacances " + ("activé" if vacation else "désactivé")})
+            if self.path == "/sleep/set":
+                if data.get("mode") not in ("timer", "end", "episodes", "idle"):
+                    return self._json(400, {"message": "Mode inconnu"})
+                sleep_start(data)
+                return self._json(200, {"message": "Minuteur programmé"})
+            if self.path == "/sleep/cancel":
+                sleep_plan = None
+                sleep_save()
+                return self._json(200, {"message": "Minuteur annulé"})
             if self.path == "/screens/off":
                 req = urllib.request.Request(f"http://{PC_IP}:{AGENT_PORT}/screens/off", data=b"",
                                              method="POST", headers={"X-Secret": SECRET})
@@ -550,6 +715,7 @@ def main():
         ThreadingHTTPServer(("0.0.0.0", AGENT_PORT), AgentHandler).serve_forever()
     else:
         threading.Thread(target=meter_loop, daemon=True).start()
+        threading.Thread(target=sleep_loop, daemon=True).start()
         print(f"Interface sur http://0.0.0.0:{WEB_PORT}")
         ThreadingHTTPServer(("0.0.0.0", WEB_PORT), WebHandler).serve_forever()
 

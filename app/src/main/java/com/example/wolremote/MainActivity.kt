@@ -264,6 +264,10 @@ class MainActivity : Activity() {
         }
         col.addView(pair(bStart, bStop))
 
+        col.addView(section("Minuteur"))
+        sleepRow = rowItem("Minuteur d'arrêt", "Aucun minuteur", "›") { Sleep.open(this, st) { refreshSleep() } }
+        col.addView(sleepRow)
+
         col.addView(section("Jellyfin"))
         col.addView(btn2("Actualiser la bibliothèque", Pal.FG, 56) {
             msg.text = "…"
@@ -276,7 +280,20 @@ class MainActivity : Activity() {
         return sv
     }
 
+    private lateinit var sleepRow: LinearLayout
+    private fun refreshSleep() {
+        thread {
+            val t = try { Sleep.describe(Sleep.status(st)) } catch (e: Exception) { null }
+            if (t != null) runOnUiThread {
+                val sub = (sleepRow.getChildAt(0) as LinearLayout).getChildAt(1) as TextView
+                sub.text = t
+                sub.setTextColor(if (t.startsWith("Actif") || t.startsWith("Extinction")) Pal.GREEN else Pal.MUTED)
+            }
+        }
+    }
+
     private fun refreshPc() {
+        refreshSleep()
         thread {
             try {
                 val r = Net.call("GET", st.tablet() + "/status", timeout = 6000)
