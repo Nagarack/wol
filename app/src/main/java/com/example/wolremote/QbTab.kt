@@ -98,7 +98,12 @@ class QbTab(private val a: Activity, private val st: Settings, private val clien
         else -> s
     }
 
-    private fun title2(t: String): android.widget.TextView {
+    // Noms de release : « Film.2026.1080p.mkv » devient « Film 2026 1080p »
+    private fun pretty(n: String): String =
+        if (n.contains(' ')) n else n.replace(Regex("\\.(mkv|mp4|avi)$", RegexOption.IGNORE_CASE), "").replace('.', ' ').replace('_', ' ')
+
+    private fun title2(t0: String): android.widget.TextView {
+        val t = pretty(t0)
         val v = a.tv(t, 15f, Pal.FG)
         v.typeface = android.graphics.Typeface.DEFAULT_BOLD
         v.maxLines = 2
@@ -173,8 +178,8 @@ class QbTab(private val a: Activity, private val st: Settings, private val clien
         summary.addView(sp)
         summary.addView(a.tv(act.size.toString() + " en cours  ·  " + done.size + " terminés", 13f, Pal.MUTED))
         summary.addView(row(
-            small("Tout pause", Pal.GRAY) { doIt("Tout est en pause") { client.pause("all") } },
-            small("Tout reprendre", Pal.GREEN) { doIt("Tout reprend") { client.resume("all") } },
+            small("Pause", Pal.GRAY) { doIt("Tout est en pause") { client.pause("all") } },
+            small("Reprendre", Pal.GREEN) { doIt("Tout reprend") { client.resume("all") } },
             small("Limite", Pal.BLUE) { limitDialog() }
         ))
 
@@ -186,6 +191,7 @@ class QbTab(private val a: Activity, private val st: Settings, private val clien
             val pct = (o.optDouble("progress", 0.0) * 100).toInt()
             c.addView(a.progress(pct))
             val fl = FlowRow(a, a.dp(6), a.dp(6))
+            fl.setPadding(0, a.dp(4), 0, 0)
             fl.addView(a.badge("$pct %", Pal.GREEN))
             fl.addView(a.badge(fmtSize(o.optLong("size", 0L)), Pal.MUTED))
             if (o.optLong("dlspeed", 0L) > 0) fl.addView(a.badge(fmtSpeed(o.optLong("dlspeed", 0L)), Pal.BLUE))
@@ -217,6 +223,7 @@ class QbTab(private val a: Activity, private val st: Settings, private val clien
             val t = o.optLong("completion_on", 0L)
             val cat = o.str("category")
             val fl = FlowRow(a, a.dp(6), a.dp(6))
+            fl.setPadding(0, a.dp(8), 0, 0)
             fl.addView(a.badge(fmtSize(o.optLong("size", 0L)), Pal.MUTED))
             if (t > 0L) fl.addView(a.badge(fmt.format(Date(t * 1000L)), Pal.MUTED))
             if (cat.isNotEmpty()) fl.addView(a.badge(cat, Pal.BLUE))
