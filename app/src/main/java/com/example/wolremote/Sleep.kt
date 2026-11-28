@@ -12,7 +12,12 @@ object Sleep {
     fun status(st: Settings): JSONObject = JSONObject(Net.call("GET", st.tablet() + "/sleep/status", timeout = 5000).body)
 
     fun describe(j: JSONObject): String {
-        if (!j.optBoolean("active")) return "Aucun minuteur"
+        if (!j.optBoolean("active")) {
+            val l = j.optJSONArray("last")
+            if (l == null || l.length() == 0) return "Aucun minuteur"
+            val f = java.text.SimpleDateFormat("HH:mm", java.util.Locale.FRANCE).format(java.util.Date(j.optLong("last_at") * 1000))
+            return "Aucun minuteur. Dernière exécution à $f :\n" + (0 until l.length()).joinToString("\n") { "• " + l.optString(it) }
+        }
         val cd = if (j.has("countdown")) j.optInt("countdown") else -1
         if (cd >= 0) return "Extinction dans $cd s…"
         val v = j.optInt("value")

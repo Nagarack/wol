@@ -162,6 +162,30 @@ object Discover {
 
     var lastInfo = ""
 
+    // Listes Radarr/Sonarr qui ajoutent des titres toutes seules (« ajout automatique ») : (port, clé, liste)
+    fun autoLists(st: Settings): List<Triple<Int, String, JSONObject>> {
+        val out = ArrayList<Triple<Int, String, JSONObject>>()
+        for ((port, kn) in listOf(7878 to "kRadarr", 8989 to "kSonarr")) {
+            val key = st.get(kn)
+            if (key.isEmpty()) continue
+            try {
+                val rr = Net.call("GET", st.base(port) + "/api/v3/importlist", key, timeout = 10000)
+                if (!rr.ok) continue
+                val a = JSONArray(rr.body)
+                for (i in 0 until a.length()) {
+                    val o = a.optJSONObject(i) ?: continue
+                    if (o.optBoolean("enableAuto") && o.optBoolean("enabled", true)) out.add(Triple(port, key, o))
+                }
+            } catch (e: Exception) { }
+        }
+        return out
+    }
+
+    fun disableAuto(st: Settings, l: Triple<Int, String, JSONObject>): Boolean = try {
+        val o = JSONObject(l.third.toString()).put("enableAuto", false)
+        Net.call("PUT", st.base(l.first) + "/api/v3/importlist/" + o.optInt("id") + "?forceSave=true", l.second, o.toString(), 20000).ok
+    } catch (e: Exception) { false }
+
     fun items(st: Settings, label: String): List<JSONObject> {
         val id = lists(st).firstOrNull { it.str("name") == nameOf(label) }?.optInt("id", -1) ?: -1
         val r = get(st, "/api/v3/importlist/movie", 60000)
@@ -484,6 +508,22 @@ object LibraryUi5 {
         var sortKey = ""
         var lastL: List<JSONObject> = emptyList()
         dialog(a, "Découvrir", body)
+        // Avertit si des listes ajoutent des films/séries toutes seules (hors de l'appli)
+        thread {
+            val auto = try { Discover.autoLists(st) } catch (e: Exception) { emptyList() }
+            if (auto.isNotEmpty()) a.runOnUiThread {
+                val w = a.card()
+                w.addView(a.tv("Ajout automatique actif", 15f, Pal.AMBER).also { it.typeface = android.graphics.Typeface.DEFAULT_BOLD })
+                w.addView(a.tv("Ces listes ajoutent et téléchargent des titres sans que tu le demandes :\n" + auto.joinToString("\n") { "• " + (if (it.first == 7878) "Radarr" else "Sonarr") + " : " + it.third.optString("name") }, 13f, Pal.MUTED).also { it.setPadding(0, a.dp(4), 0, 0) })
+                w.addView(a.btn2("Désactiver l'ajout automatique", Pal.AMBER, 44) {
+                    thread {
+                        val ok = auto.count { Discover.disableAuto(st, it) }
+                        a.runOnUiThread { w.removeAllViews(); w.addView(a.tv(if (ok == auto.size) "Ajout automatique désactivé. Les titres déjà ajoutés restent : retire-les d'un appui long ou via le suivi." else "Échec sur " + (auto.size - ok) + " liste(s) : désactive-les dans Radarr → Réglages → Listes.", 13f, Pal.MUTED)) }
+                    }
+                })
+                body.addView(w, 0)
+            }
+        }
         var mode = "films"
         var cur = Discover.KINDS[0].first
         fun kinds(): List<String> = if (Tmdb.has(st)) Tmdb.kinds(mode != "films") else if (mode == "films") Discover.KINDS.map { it.first } else Shows.KINDS

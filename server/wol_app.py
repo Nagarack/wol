@@ -22,7 +22,7 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 # WOL_SERVER : ce fichier ne contient AUCUN secret. PIN, secret, MAC, IP... sont dans ~/wol_config.json
-VERSION = 12
+VERSION = 13
 UPDATE_BASE = "https://raw.githubusercontent.com/Nagarack/wol/main/server/"
 CONFIG_FILE = os.path.expanduser("~/wol_config.json")
 # ================= CONFIG (valeurs par défaut, surchargées par ~/wol_config.json) =================
@@ -409,7 +409,7 @@ def sleep_start(d):
 def sleep_status():
     p = sleep_plan
     if not p:
-        return {"active": False}
+        return {"active": False, "last": sleep_last.get("steps", []), "last_at": int(sleep_last.get("at", 0))}
     now = time.time()
     r = {"active": True, "mode": p["mode"], "value": p["value"], "actions": p["actions"], "seen": len(p.get("seen", []))}
     if p["mode"] == "timer":
@@ -419,41 +419,59 @@ def sleep_status():
     return r
 
 
+sleep_last = {}
+
+
+def _slog(step, ok, msg=""):
+    sleep_last.setdefault("steps", []).append(f"{step} : {'OK' if ok else 'échec'}" + (f" ({msg})" if msg else ""))
+    sleep_last["at"] = time.time()
+
+
 def sleep_run(p):
     """Ordre fixe : 1) arrêt de la lecture  2) fermeture de l'appli Jellyfin de la télé  3) extinction de la télé  4) écrans / extinction du PC."""
+    sleep_last.clear()
+    sleep_last["steps"] = []
     key = p.get("key", "")
     acts = p["actions"]
     tvip = p.get("tv_ip", "")
-    if "stop" in acts and key:
+    if "stop" in acts:
         try:
-            for x in jf_playing(key):
-                _jf(f"/Sessions/{x['sid']}/Playing/Stop", key, "POST")
-        except Exception:
-            pass
+            n = 0
+            if key:
+                for x in jf_playing(key):
+                    _jf(f"/Sessions/{x['sid']}/Playing/Stop", key, "POST")
+                    n += 1
+            _slog("Arrêt de la lecture", bool(key), f"{n} session(s)" if key else "clé Jellyfin manquante")
+        except Exception as e:
+            _slog("Arrêt de la lecture", False, str(e)[:60])
     if tvip and ("stop" in acts or "tv" in acts):
         try:
             time.sleep(2)
-            tv_close_app(tvip)
+            m = tv_close_app(tvip)
+            _slog("Fermeture de Jellyfin", True, m)
             time.sleep(3)
-        except Exception:
-            pass
+        except Exception as e:
+            _slog("Fermeture de Jellyfin", False, str(e)[:60])
     if "tv" in acts and tvip:
         try:
             tv_keys(tvip, ["KEY_POWER"])
+            _slog("Extinction de la télé", True)
             time.sleep(4)
-        except Exception:
-            pass
+        except Exception as e:
+            _slog("Extinction de la télé", False, str(e)[:60])
     if "screens" in acts and "shutdown" not in acts:
         try:
             req = urllib.request.Request(f"http://{PC_IP}:{AGENT_PORT}/screens/off", data=b"", method="POST", headers={"X-Secret": SECRET})
             urllib.request.urlopen(req, timeout=10).read()
-        except Exception:
-            pass
+            _slog("Écrans du PC", True)
+        except Exception as e:
+            _slog("Écrans du PC", False, str(e)[:60])
     if "shutdown" in acts:
         try:
             remote_shutdown()
-        except Exception:
-            pass
+            _slog("Extinction du PC", True)
+        except Exception as e:
+            _slog("Extinction du PC", False, str(e)[:60])
 
 
 def sleep_loop():
@@ -473,9 +491,12 @@ def sleep_loop():
                     sleep_run(p)
                 continue
             if not is_online():
-                sleep_plan = None      # PC déjà éteint : rien à programmer
-                sleep_save()
+                p["off_n"] = p.get("off_n", 0) + 1
+                if p["off_n"] >= 6:     # PC injoignable pendant ~1 min : déjà éteint, rien à programmer
+                    sleep_plan = None
+                    sleep_save()
                 continue
+            p["off_n"] = 0
             trigger = False
             mode = p["mode"]
             if mode == "timer":
