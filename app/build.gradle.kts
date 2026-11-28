@@ -10,8 +10,8 @@ android {
         applicationId = "com.example.wolremote"
         minSdk = 24
         targetSdk = 34
-        versionCode = 71
-        versionName = "3.36.1"
+        versionCode = 72
+        versionName = "3.36.2"
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17

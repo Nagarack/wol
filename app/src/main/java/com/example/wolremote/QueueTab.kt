@@ -23,6 +23,7 @@ class QueueTab(private val a: Activity, private val st: Settings, private val qb
         var port = 0
         var keyName = ""
         var n = 1
+        var state = ""
     }
 
     // « 00:08:29 » ou « 1.02:00:00 » -> « 8 min »
@@ -115,6 +116,15 @@ class QueueTab(private val a: Activity, private val st: Settings, private val qb
                             val h = o.str("hash").uppercase()
                             val item = items.firstOrNull { x -> x.hash.isNotEmpty() && x.hash == h } ?: continue
                             item.pct = (o.optDouble("progress", 0.0) * 100).toInt()
+                            item.state = when (o.str("state")) {
+                                "metaDL", "forcedMetaDL" -> "Récupération des métadonnées (aucun pair ?)"
+                                "stalledDL" -> "Aucun pair ne partage pour l'instant"
+                                "pausedDL", "stoppedDL" -> "En pause dans qBittorrent"
+                                "queuedDL" -> "En file d'attente qBittorrent"
+                                "checkingDL", "checkingResumeData" -> "Vérification des fichiers"
+                                "error", "missingFiles" -> "Erreur qBittorrent"
+                                else -> ""
+                            }
                             val sp = o.optLong("dlspeed", 0L)
                             val eta = o.optLong("eta", 8640000L)
                             item.extra = (if (sp >= 1000000L) String.format(java.util.Locale.FRANCE, "%.1f Mo/s", sp / 1e6) else String.format(java.util.Locale.FRANCE, "%.0f Ko/s", sp / 1e3)) +
@@ -142,6 +152,7 @@ class QueueTab(private val a: Activity, private val st: Settings, private val qb
                     fl.addView(a.badge(item.who, if (item.who == "Radarr") Pal.AMBER else Pal.BLUE))
                     if (item.n > 1) fl.addView(a.badge(item.n.toString() + " épisodes", Pal.PURPLE))
                     if (item.extra.isNotEmpty()) fl.addView(a.badge(item.extra, Pal.MUTED))
+                    if (item.state.isNotEmpty()) fl.addView(a.badge(item.state, Pal.AMBER))
                     c.addView(fl)
                     if (item.hash.isNotEmpty() && qb.stalled.contains(item.hash)) {
                         c.addView(a.tv("Bloqué depuis plus de 30 min", 13f, Pal.RED))
