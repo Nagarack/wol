@@ -60,6 +60,7 @@ class PowerCard(private val a: Activity, private val st: Settings) {
     private val temps = a.tv("", 13f, Pal.MUTED)
     private val today = a.tv("", 14f, Pal.FG)
     private val month = a.tv("", 13f, Pal.MUTED)
+    private val session = a.tv("", 14f, Pal.FG)
     private val forecast = a.tv("", 13f, Pal.MUTED)
     private val chartTitle = a.tv("", 12f, Pal.MUTED)
     private val chart = BarChart(a)
@@ -69,16 +70,18 @@ class PowerCard(private val a: Activity, private val st: Settings) {
 
     init {
         big.typeface = Typeface.DEFAULT_BOLD
-        for (t in listOf(big, detail, temps, today, month, forecast)) t.gravity = Gravity.CENTER
+        for (t in listOf(big, detail, temps, today, month, forecast, session)) t.gravity = Gravity.CENTER
         detail.setPadding(0, a.dp(6), 0, 0)
         temps.setPadding(0, a.dp(2), 0, 0)
         today.setPadding(0, a.dp(10), 0, 0)
+        session.setPadding(0, a.dp(8), 0, 0)
         month.setPadding(0, a.dp(2), 0, 0)
         chartTitle.setPadding(0, a.dp(14), 0, a.dp(4))
         view.addView(a.tv("Consommation estimée", 14f, Pal.MUTED))
         view.addView(big)
         view.addView(detail)
         view.addView(temps)
+        view.addView(session)
         view.addView(today)
         view.addView(month)
         view.addView(forecast)
@@ -88,6 +91,11 @@ class PowerCard(private val a: Activity, private val st: Settings) {
             span = when (span) { 7 -> 14; 14 -> 30; else -> 7 }
             last?.let { drawChart(it) }
         }
+    }
+
+    private fun dur(s: Int): String {
+        val m = s / 60
+        return if (m >= 60) (m / 60).toString() + " h " + String.format(Locale.FRANCE, "%02d", m % 60) + " min" else maxOf(m, 1).toString() + " min"
     }
 
     private fun kwh(wh: Double, price: Double): String =
@@ -128,6 +136,7 @@ class PowerCard(private val a: Activity, private val st: Settings) {
                     detail.text = msg
                     temps.text = ""
                     today.text = ""
+                    session.text = ""
                     month.text = ""
                     forecast.text = ""
                     return@runOnUiThread
@@ -162,6 +171,12 @@ class PowerCard(private val a: Activity, private val st: Settings) {
                     big.setTextColor(Pal.MUTED)
                     detail.text = "PC allumé, capteurs injoignables (LibreHardwareMonitor non lancé ?)"
                 }
+                val cur = if (d.isNull("session_s")) -1 else d.optInt("session_s")
+                val lastS = if (d.isNull("last_sess_s")) -1 else d.optInt("last_sess_s")
+                session.text = if (!d.has("session_s")) "" else if (cur >= 0) "Session en cours : " + dur(cur) + (if (lastS >= 0) "  ·  précédente " + dur(lastS) else "")
+                    else if (lastS >= 0) "Dernière session : " + dur(lastS) else ""
+                if (d.has("hours_today")) session.text = session.text.toString() + (if (session.text.isNotEmpty()) "\n" else "") +
+                    String.format(Locale.FRANCE, "Allumé aujourd'hui : %.1f h  ·  ce mois-ci : %.0f h", d.optDouble("hours_today"), d.optDouble("hours_month"))
                 today.text = "Aujourd'hui : " + kwh(d.optDouble("today_wh"), price)
                 month.text = "Ce mois-ci : " + kwh(d.optDouble("month_wh"), price)
                 val cal = Calendar.getInstance()

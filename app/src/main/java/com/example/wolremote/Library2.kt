@@ -350,7 +350,8 @@ object Tmdb {
             out.add(JSONObject().put("title", o.str(if (tv) "name" else "title")).put("year", date.take(4).toIntOrNull() ?: 0)
                 .put("overview", o.str("overview")).put("remotePoster", if (p.isEmpty()) "" else "https://image.tmdb.org/t/p/w185$p")
                 .put("tmdbId", id).put("tv", tv)
-                .put("sub", listOf(note, if (tracked.contains(id)) "Suivi, pas téléchargé" else "", if (why.containsKey(id)) "Comme « " + why[id] + " »" else "").filter { it.isNotEmpty() }.joinToString(" · ")))
+                .put("rating", o.optDouble("vote_average", 0.0)).put("votes", o.optInt("vote_count", 0)).put("pop", o.optDouble("popularity", 0.0)).put("date", date)
+                .put("sub", listOf(note + (if (o.optInt("vote_count", 0) > 0) " (" + o.optInt("vote_count") + " votes)" else ""), if (tracked.contains(id)) "Suivi, pas téléchargé" else "", if (why.containsKey(id)) "Comme « " + why[id] + " »" else "").filter { it.isNotEmpty() }.joinToString(" · ")))
         }
         lastHidden = hidden
         return out.take(60)
@@ -382,7 +383,15 @@ object LibraryUi5 {
         info.setPadding(0, a.dp(8), 0, 0)
         val list = LinearLayout(a); list.orientation = LinearLayout.VERTICAL
         hs.setPadding(0, a.dp(8), 0, 0)
-        body.addView(modes); body.addView(hs); body.addView(info); body.addView(list)
+        val sortScroll = android.widget.HorizontalScrollView(a)
+        sortScroll.isHorizontalScrollBarEnabled = false
+        val sortRow = LinearLayout(a); sortRow.orientation = LinearLayout.HORIZONTAL
+        sortScroll.addView(sortRow)
+        sortScroll.setPadding(0, a.dp(8), 0, 0)
+        sortScroll.visibility = if (Tmdb.has(st)) android.view.View.VISIBLE else android.view.View.GONE
+        body.addView(modes); body.addView(hs); body.addView(sortScroll); body.addView(info); body.addView(list)
+        var sortKey = ""
+        var lastL: List<JSONObject> = emptyList()
         dialog(a, "Découvrir", body)
         var mode = "films"
         var cur = Discover.KINDS[0].first
@@ -400,7 +409,16 @@ object LibraryUi5 {
             row.addView(v, lp)
         }
 
-        fun show(l: List<JSONObject>) {
+        fun sorted(l: List<JSONObject>): List<JSONObject> = when (sortKey) {
+            "rating" -> l.sortedByDescending { it.optDouble("rating", 0.0) * (if (it.optInt("votes") >= 50) 1.0 else 0.0) + it.optDouble("rating", 0.0) / 100 }
+            "votes" -> l.sortedByDescending { it.optInt("votes") }
+            "pop" -> l.sortedByDescending { it.optDouble("pop") }
+            "date" -> l.sortedByDescending { it.str("date") }
+            else -> l
+        }
+        fun show(l0: List<JSONObject>) {
+            lastL = l0
+            val l = sorted(l0)
             list.removeAllViews()
             info.text = if (l.isEmpty()) "Rien pour l'instant. " + (if (mode == "films" && !Tmdb.has(st)) Discover.lastInfo else "Réessaie dans une minute.") else "Touche un titre pour l'ajouter et lancer son téléchargement." + (if (Tmdb.has(st)) (if (Tmdb.lastHidden > 0) "\n" + Tmdb.lastHidden + " déjà dans ta bibliothèque, masqué(s)." else "") else if (mode == "films") "\n\n" + Discover.lastInfo else "")
             for (o in l) {
@@ -445,6 +463,15 @@ object LibraryUi5 {
             }
         }
 
+        lateinit var showRef: (List<JSONObject>) -> Unit
+        fun sortRender() {
+            sortRow.removeAllViews()
+            val add2 = LinearLayout.LayoutParams(WRAP, WRAP)
+            sortRow.addView(a.tv("Trier :", 13f, Pal.MUTED).also { it.setPadding(0, a.dp(8), a.dp(8), 0) })
+            for ((lbl, k) in listOf("Pertinence" to "", "Note" to "rating", "Votes" to "votes", "Popularité" to "pop", "Récent" to "date"))
+                add(sortRow, chip(lbl, sortKey == k) { sortKey = k; sortRender(); showRef(lastL) })
+        }
+        showRef = { l -> show(l) }
         fun chipsRender() {
             chips.removeAllViews()
             for (k in kinds()) add(chips, chip(k, k == cur) { cur = k; chipsRender(); load(k) })
@@ -452,6 +479,7 @@ object LibraryUi5 {
 
         fun start() {
             chipsRender()
+            if (Tmdb.has(st)) sortRender()
             list.removeAllViews()
             if (mode == "series" || Tmdb.has(st)) { load(cur); return }
             info.text = "Chargement…"

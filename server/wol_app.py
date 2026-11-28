@@ -22,7 +22,7 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 # WOL_SERVER : ce fichier ne contient AUCUN secret. PIN, secret, MAC, IP... sont dans ~/wol_config.json
-VERSION = 1
+VERSION = 2
 UPDATE_BASE = "https://raw.githubusercontent.com/Nagarack/wol/main/server/"
 CONFIG_FILE = os.path.expanduser("~/wol_config.json")
 # ================= CONFIG (valeurs par défaut, surchargées par ~/wol_config.json) =================
@@ -236,8 +236,25 @@ def meter_loop():
         pass
     last = 0.0
     saved = time.time()
+    tick = time.time()
     while True:
         time.sleep(5)
+        # Durée des sessions : début à l'allumage, fin à l'extinction (conservé dans le fichier du compteur)
+        nowt = time.time()
+        dt = nowt - tick
+        tick = nowt
+        up = is_online()
+        with _lock:
+            if up:
+                if not energy.get("sess_start"):
+                    energy["sess_start"] = nowt
+                if dt <= 30:
+                    hd = energy.setdefault("hours", {})
+                    dk = datetime.date.today().isoformat()
+                    hd[dk] = hd.get(dk, 0.0) + dt / 3600.0
+            elif energy.get("sess_start"):
+                energy["last_sess"] = {"end": nowt, "secs": max(0, nowt - energy["sess_start"])}
+                energy["sess_start"] = None
         if time.time() - saved > 60:
             try:
                 with _lock, open(METER_FILE, "w") as f:
@@ -282,6 +299,14 @@ def power_report():
     r["today_wh"] = round(days.get(today.isoformat(), 0.0), 1)
     r["month_wh"] = round(sum(v for k, v in days.items() if k.startswith(month)), 1)
     r["total_wh"] = round(sum(days.values()), 1)
+    with _lock:
+        ss = energy.get("sess_start")
+        ls = energy.get("last_sess")
+        hrs = dict(energy.get("hours", {}))
+    r["session_s"] = int(time.time() - ss) if ss else None
+    r["last_sess_s"] = int(ls["secs"]) if ls else None
+    r["hours_today"] = round(hrs.get(today.isoformat(), 0.0), 2)
+    r["hours_month"] = round(sum(v for k, v in hrs.items() if k.startswith(month)), 1)
     hist = []
     for i in range(29, -1, -1):
         d = (today - datetime.timedelta(days=i)).isoformat()
