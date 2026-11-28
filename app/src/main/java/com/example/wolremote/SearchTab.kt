@@ -603,6 +603,17 @@ class SearchTab(private val a: Activity, private val st: Settings) {
         return out
     }
 
+    private fun removeFromLib(o: JSONObject, isSeries: Boolean, files: Boolean, lib: android.widget.TextView, rm: android.widget.TextView) {
+        rm.text = "Retrait…"
+        thread {
+            val err = try { if (isSeries) Shows.remove(st, o.optInt("tvdbId"), files) else MovieRemove.run(st, o.optInt("tmdbId"), files) } catch (e: Exception) { e.message ?: "erreur" }
+            a.runOnUiThread {
+                if (err == null) { o.put("id", 0); lib.text = "Retiré de la bibliothèque"; lib.setTextColor(Pal.MUTED); rm.visibility = View.GONE }
+                else { rm.text = "Échec : $err" }
+            }
+        }
+    }
+
     private fun matchRow(o: JSONObject, click: () -> Unit): View {
         val row = LinearLayout(a)
         row.orientation = LinearLayout.HORIZONTAL
@@ -616,7 +627,21 @@ class SearchTab(private val a: Activity, private val st: Settings) {
         txt.setPadding(a.dp(12), 0, 0, 0)
         val year = o.optInt("year", 0)
         txt.addView(a.tv(o.str("title") + (if (year > 0) " ($year)" else ""), 16f, Pal.FG))
-        if (o.optInt("id", 0) > 0) txt.addView(a.tv("Déjà dans la bibliothèque", 12f, Pal.GREEN))
+        if (o.optInt("id", 0) > 0) {
+            val lib = a.tv("Déjà dans la bibliothèque", 12f, Pal.GREEN)
+            txt.addView(lib)
+            val rm = a.tv("Retirer de la bibliothèque", 13f, Pal.RED)
+            rm.setPadding(0, a.dp(4), 0, a.dp(4))
+            rm.setOnClickListener {
+                val isSeries = o.optInt("tvdbId", 0) > 0
+                a.dialogBuilder().setTitle("Retirer « " + o.str("title") + " » ?")
+                    .setMessage("Les téléchargements en cours sont arrêtés et le titre n'est plus suivi. Que faire des fichiers déjà téléchargés ?")
+                    .setPositiveButton("Garder les fichiers") { _, _ -> removeFromLib(o, isSeries, false, lib, rm) }
+                    .setNeutralButton("Supprimer les fichiers") { _, _ -> removeFromLib(o, isSeries, true, lib, rm) }
+                    .setNegativeButton("Annuler", null).show()
+            }
+            txt.addView(rm)
+        }
         val ov = o.str("overview")
         if (ov.isNotEmpty()) txt.addView(a.tv(ov.take(110) + "…", 12f, Pal.MUTED))
         row.addView(txt, LinearLayout.LayoutParams(0, WRAP, 1f))
