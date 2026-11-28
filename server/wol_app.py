@@ -22,7 +22,7 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 # WOL_SERVER : ce fichier ne contient AUCUN secret. PIN, secret, MAC, IP... sont dans ~/wol_config.json
-VERSION = 5
+VERSION = 6
 UPDATE_BASE = "https://raw.githubusercontent.com/Nagarack/wol/main/server/"
 CONFIG_FILE = os.path.expanduser("~/wol_config.json")
 # ================= CONFIG (valeurs par défaut, surchargées par ~/wol_config.json) =================
@@ -186,6 +186,29 @@ class _WS:
             pass
 
 
+def tv_info(ip):
+    """Infos publiques de la télé (répond seulement si elle est allumée) : adresse MAC, nom…"""
+    try:
+        with urllib.request.urlopen(f"http://{ip}:8001/api/v2/", timeout=3) as r:
+            return json.loads(r.read()).get("device") or {}
+    except Exception:
+        return None
+
+
+def tv_wake(ip, mac=""):
+    """Rallume la télé par Wake-on-LAN (option « Mise sous tension via réseau » de la télé)."""
+    if tv_info(ip) is not None:
+        return True, "La télé est déjà allumée"
+    toks = _tv_tokens()
+    mac = (mac or toks.get("mac_" + ip, "")).strip()
+    if not mac:
+        return False, "Adresse MAC inconnue : allume la télé une fois et utilise un bouton de volume pour l'enregistrer, ou saisis-la dans Réglages"
+    for _ in range(3):
+        send_magic_packet(mac, BROADCAST)
+        time.sleep(0.3)
+    return True, "Signal d'allumage envoyé (la télé doit avoir « Mise sous tension via réseau » activée)"
+
+
 def tv_keys(ip, keys, port=8002, use_ssl=True):
     """Envoie des touches de télécommande à une télé Samsung. Premier usage : accepter la demande sur la télé."""
     import base64
@@ -210,6 +233,14 @@ def tv_keys(ip, keys, port=8002, use_ssl=True):
                 break
             if ev in ("ms.channel.timeOut", "ms.error"):
                 raise Exception("connexion refusée : accepte la demande sur la télé")
+        if port == 8002:   # retient l'adresse MAC pour pouvoir la rallumer plus tard
+            d = tv_info(ip) or {}
+            mac = d.get("wifiMac") or ""
+            toks = _tv_tokens()
+            if mac and toks.get("mac_" + ip) != mac:
+                toks["mac_" + ip] = mac
+                with open(TV_FILE, "w") as f:
+                    json.dump(toks, f)
         for k in keys:
             ws.send(json.dumps({"method": "ms.remote.control", "params": {"Cmd": "Click", "DataOfCmd": k, "Option": "false", "TypeOfRemote": "SendRemoteKey"}}))
             time.sleep(0.25)
@@ -766,6 +797,12 @@ class WebHandler(BaseHTTPRequestHandler):
                 elif os.path.exists(VAC_FILE):
                     os.remove(VAC_FILE)
                 return self._json(200, {"message": "Mode vacances " + ("activé" if vacation else "désactivé")})
+            if self.path == "/tv/wake":
+                ip = str(data.get("ip", "")).strip()
+                if not ip:
+                    return self._json(400, {"message": "Adresse de la télé manquante"})
+                ok, msg = tv_wake(ip, str(data.get("mac", "")))
+                return self._json(200, {"ok": ok, "message": msg})
             if self.path == "/tv/key":
                 ip = str(data.get("ip", "")).strip()
                 keys = [k for k in data.get("keys", []) if isinstance(k, str) and k.startswith("KEY_")][:20]

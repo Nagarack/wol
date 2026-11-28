@@ -56,6 +56,18 @@ object Remote {
         } catch (e: Exception) { "Tablette injoignable" }
     }
 
+    // Rallume la télé (Wake-on-LAN) ; null = envoyé
+    fun tvWake(st: Settings): String? {
+        val ip = st.get("kTvIp").trim()
+        if (ip.isEmpty()) return "Renseigne l'adresse IP de la télé dans Réglages."
+        return try {
+            val r = Net.call("POST", st.tablet() + "/tv/wake", json = JSONObject().put("pin", st.pin()).put("ip", ip).put("mac", st.get("kTvMac").trim()).toString(), timeout = 15000)
+            if (r.code == 404) "Mets à jour le serveur de la tablette (Réglages, Serveur)."
+            else if (!r.ok) "Tablette : HTTP " + r.code
+            else JSONObject(r.body).let { if (it.optBoolean("ok")) null else it.optString("message") }
+        } catch (e: Exception) { "Tablette injoignable" }
+    }
+
     fun commandArgs(st: Settings, id: String, name: String, args: JSONObject): Boolean =
         Jellyfin.postJson(st, "/Sessions/$id/Command", JSONObject().put("Name", name).put("Arguments", args).toString()).ok
     fun seek(st: Settings, id: String, ticks: Long): Boolean =
@@ -98,6 +110,7 @@ object RemoteUi {
         body.addView(list)
         var alive = true
         updaters.clear()
+        if (st.get("kTvIp").trim().isNotEmpty()) body.addView(tvPanel(a, st), 1)
         a.bigDialog("Télécommande", body, "Fermer", false) { alive = false }
         thread {
             var sig = ""
@@ -125,18 +138,50 @@ object RemoteUi {
 
     private val updaters = HashMap<String, (Remote.Sess) -> Unit>()
 
+    // Télé Samsung : allumer, éteindre, volume. Disponible même quand aucune session Jellyfin n'est active.
+    private fun tvPanel(a: Activity, st: Settings): LinearLayout {
+        val c = a.card()
+        c.addView(a.tv("Télé Samsung", 17f, Pal.FG).also { it.typeface = android.graphics.Typeface.DEFAULT_BOLD })
+        val msg = a.tv("", 12f, Pal.MUTED)
+        fun send(label: String, f: () -> String?) {
+            msg.text = "$label…"
+            thread {
+                val err = try { f() } catch (e: Exception) { e.message ?: "erreur" }
+                a.runOnUiThread { msg.text = err ?: "OK" ; msg.setTextColor(if (err == null) Pal.GREEN else Pal.RED) }
+            }
+        }
+        fun keys(label: String, vararg k: String): () -> Unit = { send(label) { Remote.tvKeys(st, k.toList()) } }
+        fun row(vararg b: android.widget.Button): LinearLayout {
+            val r = LinearLayout(a)
+            r.orientation = LinearLayout.HORIZONTAL
+            for (v in b) { v.layoutParams = LinearLayout.LayoutParams(0, WRAP, 1f).also { it.leftMargin = a.dp(3); it.rightMargin = a.dp(3); it.topMargin = a.dp(8) }; r.addView(v) }
+            return r
+        }
+        c.addView(row(
+            a.btn("Allumer", Pal.GREEN, 44) { send("Allumage") { Remote.tvWake(st) } },
+            a.btn2("Éteindre", Pal.RED, 44) {
+                a.dialogBuilder().setMessage("Éteindre la télévision ?").setPositiveButton("Éteindre") { _, _ -> keys("Extinction", "KEY_POWER")() }.setNegativeButton("Annuler", null).show()
+            }))
+        c.addView(row(a.btn2("Vol −", Pal.FG, 44) { keys("Volume", "KEY_VOLDOWN")() }, a.btn2("Vol +", Pal.FG, 44) { keys("Volume", "KEY_VOLUP")() }, a.btn2("Muet", Pal.FG, 44) { keys("Muet", "KEY_MUTE")() }))
+        c.addView(row(a.btn2("Vol −5", Pal.FG, 44) { keys("Volume", "KEY_VOLDOWN", "KEY_VOLDOWN", "KEY_VOLDOWN", "KEY_VOLDOWN", "KEY_VOLDOWN")() },
+            a.btn2("Vol +5", Pal.FG, 44) { keys("Volume", "KEY_VOLUP", "KEY_VOLUP", "KEY_VOLUP", "KEY_VOLUP", "KEY_VOLUP")() }))
+        msg.setPadding(0, a.dp(8), 0, 0)
+        c.addView(msg)
+        return c
+    }
+
     private fun hms(ticks: Long): String {
         val s = (ticks / 10000000L).toInt()
         return if (s >= 3600) String.format("%d:%02d:%02d", s / 3600, (s % 3600) / 60, s % 60) else String.format("%d:%02d", s / 60, s % 60)
     }
 
-    private fun bar(a: Activity, max: Int, change: (Int) -> Unit, drag: (Boolean) -> Unit): android.widget.SeekBar {
+    private fun bar(a: Activity, max: Int, change: (Int) -> Unit, drag: (Boolean) -> Unit, live: ((Int) -> Unit)? = null): android.widget.SeekBar {
         val b = android.widget.SeekBar(a)
         b.max = max
         b.progressTintList = android.content.res.ColorStateList.valueOf(Pal.BLUE)
         b.thumbTintList = android.content.res.ColorStateList.valueOf(Pal.BLUE)
         b.setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(s: android.widget.SeekBar, p: Int, fromUser: Boolean) {}
+            override fun onProgressChanged(s: android.widget.SeekBar, p: Int, fromUser: Boolean) { if (fromUser) live?.invoke(p) }
             override fun onStartTrackingTouch(s: android.widget.SeekBar) { drag(true) }
             override fun onStopTrackingTouch(s: android.widget.SeekBar) { drag(false); change(s.progress) }
         })
@@ -174,8 +219,9 @@ object RemoteUi {
 
         // Barre de lecture
         var dragPos = false
-        val seek = bar(a, 1000, { p -> if (x.run > 0) go { Remote.seek(st, x.id, x.run * p / 1000) } }, { dragPos = it })
-        val time = a.tv("", 12f, Pal.MUTED)
+        val time = a.tv("", 14f, Pal.FG)
+        val seek = bar(a, 1000, { p -> if (x.run > 0) go { Remote.seek(st, x.id, x.run * p / 1000) } }, { dragPos = it },
+            { p -> if (x.run > 0) { time.text = hms(x.run * p / 1000) + " / " + hms(x.run); time.setTextColor(Pal.BLUE) } })
         time.gravity = android.view.Gravity.CENTER
         val playBox = LinearLayout(a)
         playBox.orientation = LinearLayout.VERTICAL
@@ -219,21 +265,7 @@ object RemoteUi {
         var dragVol = false
         val mute = a.btn2("Muet", Pal.FG, 40) { go { Remote.command(st, x.id, "ToggleMute") } }
         val volBar = bar(a, 100, { p -> go { Remote.commandArgs(st, x.id, "SetVolume", JSONObject().put("Volume", p.toString())) } }, { dragVol = it })
-        if (tv) {
-            fun tvk(vararg k: String): () -> Unit = {
-                thread {
-                    val err = Remote.tvKeys(st, k.toList())
-                    if (err != null) a.runOnUiThread { android.widget.Toast.makeText(a, err, android.widget.Toast.LENGTH_LONG).show() }
-                }
-            }
-            c.addView(a.tv("Télé", 12f, Pal.MUTED).also { it.setPadding(0, a.dp(10), 0, 0) })
-            c.addView(row(a.btn2("Vol −", Pal.FG, 44) { tvk("KEY_VOLDOWN")() }, a.btn2("Vol +", Pal.FG, 44) { tvk("KEY_VOLUP")() }, a.btn2("Muet", Pal.FG, 44) { tvk("KEY_MUTE")() }))
-            c.addView(row(a.btn2("Vol −5", Pal.FG, 44) { tvk("KEY_VOLDOWN", "KEY_VOLDOWN", "KEY_VOLDOWN", "KEY_VOLDOWN", "KEY_VOLDOWN")() },
-                a.btn2("Vol +5", Pal.FG, 44) { tvk("KEY_VOLUP", "KEY_VOLUP", "KEY_VOLUP", "KEY_VOLUP", "KEY_VOLUP")() },
-                a.btn2("Éteindre la télé", Pal.RED, 44) {
-                    a.dialogBuilder().setMessage("Éteindre la télévision ?").setPositiveButton("Éteindre") { _, _ -> tvk("KEY_POWER")() }.setNegativeButton("Annuler", null).show()
-                }))
-        } else {
+        if (!tv) {
             val volRow = LinearLayout(a)
             volRow.orientation = LinearLayout.HORIZONTAL
             volRow.gravity = android.view.Gravity.CENTER_VERTICAL
@@ -278,7 +310,7 @@ object RemoteUi {
             ttl.visibility = if (s.title.isEmpty()) android.view.View.GONE else android.view.View.VISIBLE
             playBox.visibility = if (s.title.isEmpty()) android.view.View.GONE else android.view.View.VISIBLE
             trackRow.visibility = if (s.title.isEmpty()) android.view.View.GONE else android.view.View.VISIBLE
-            if (!dragPos && s.run > 0) { seek.progress = (s.pos * 1000 / s.run).toInt(); time.text = hms(s.pos) + " / " + hms(s.run) }
+            if (!dragPos && s.run > 0) { time.setTextColor(Pal.FG); seek.progress = (s.pos * 1000 / s.run).toInt(); time.text = hms(s.pos) + " / " + hms(s.run) }
             if (!dragVol && s.vol >= 0) volBar.progress = s.vol
             if (!tv) mute.text = if (s.muted) "Son" else "Muet"
         }
