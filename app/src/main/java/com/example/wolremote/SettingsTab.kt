@@ -26,19 +26,33 @@ class SettingsTab(private val a: Activity, private val st: Settings) {
         var col = root
         val bodies = ArrayList<LinearLayout>()
         // Chaque rubrique est un groupe repliable : l'écran reste court
-        fun grp(title: String) {
+        val refreshers = ArrayList<() -> Unit>()
+        fun grp(title: String, vararg keys: String) {
             val body = LinearLayout(a)
             body.orientation = LinearLayout.VERTICAL
             bodies.add(body)
             val wrap = a.indented(body)
             wrap.visibility = android.view.View.GONE
-            val head = a.rowItem(title, "", "+") {}
+            val head = a.rowItem(title, " ", "+") {}
             a.boldHead(head)
             val mark = head.getChildAt(1) as android.widget.TextView
+            val subTv = (head.getChildAt(0) as LinearLayout).getChildAt(1) as android.widget.TextView
+            val upd: () -> Unit = {
+                val ks = keys.toList()
+                if (ks.isEmpty()) subTv.visibility = android.view.View.GONE
+                else {
+                    val n = ks.count { (fields[it]?.text?.toString() ?: st.get(it)).trim().isNotEmpty() }
+                    subTv.text = if (n == ks.size) "Renseigné" else if (n == 0) "À renseigner" else "$n / ${ks.size} renseignés"
+                    subTv.setTextColor(if (n == ks.size) Pal.GREEN else Pal.MUTED)
+                }
+            }
+            refreshers.add(upd)
+            upd()
             head.setOnClickListener {
                 val open = wrap.visibility == android.view.View.GONE
                 wrap.visibility = if (open) android.view.View.VISIBLE else android.view.View.GONE
                 mark.text = if (open) "−" else "+"
+                refreshers.forEach { it() }
             }
             root.addView(head)
             root.addView(wrap)
@@ -59,27 +73,27 @@ class SettingsTab(private val a: Activity, private val st: Settings) {
         val pw = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
         val num = InputType.TYPE_CLASS_NUMBER
 
-        grp("Wake-on-LAN")
+        grp("Wake-on-LAN", "url", "pin")
         add("Serveur Wake-on-LAN (tablette)", "url", uri)
         add("Code PIN", "pin", InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD)
-        grp("Accès au PC")
+        grp("Accès au PC", "host", "host2")
         add("PC : adresse sur le réseau local", "host", uri)
         add("PC : adresse Tailscale (IP ou nom)", "host2", uri)
-        grp("Clés API")
+        grp("Clés API", "kProwlarr", "kRadarr", "kSonarr", "kTmdb")
         add("Clé API Prowlarr", "kProwlarr", pw)
         add("Clé API Radarr", "kRadarr", pw)
         add("Clé API Sonarr", "kSonarr", pw)
-        add("Clé API TMDb (facultative, gratuite : suggestions Découvrir)", "kTmdb", pw)
+        add("Clé API TMDb (facultative, pour Découvrir)", "kTmdb", pw)
         grp("Qualité")
         add("Profil de qualité Radarr (ID, vide = le premier)", "pRadarr", num)
         add("Profil de qualité Sonarr (ID, vide = le premier)", "pSonarr", num)
-        grp("qBittorrent")
+        grp("qBittorrent", "kQbUser", "kQbPass")
         add("qBittorrent : port (8080 par défaut)", "pQb", num)
         add("qBittorrent : utilisateur", "kQbUser", InputType.TYPE_CLASS_TEXT)
         add("qBittorrent : mot de passe", "kQbPass", pw)
-        grp("Jellyfin")
+        grp("Jellyfin", "kJellyfin")
         add("Clé API Jellyfin (Tableau de bord, Clés API)", "kJellyfin", pw)
-        grp("Consommation")
+        grp("Consommation", "kTarifKwh")
         add("Prix du kWh en € (par défaut : tarif réglementé EDF Base)", "kTarifKwh", InputType.TYPE_CLASS_TEXT)
 
         col = root

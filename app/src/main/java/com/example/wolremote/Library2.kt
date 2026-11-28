@@ -351,7 +351,7 @@ object Tmdb {
                 .put("overview", o.str("overview")).put("remotePoster", if (p.isEmpty()) "" else "https://image.tmdb.org/t/p/w185$p")
                 .put("tmdbId", id).put("tv", tv)
                 .put("rating", o.optDouble("vote_average", 0.0)).put("votes", o.optInt("vote_count", 0)).put("pop", o.optDouble("popularity", 0.0)).put("date", date)
-                .put("sub", listOf(note + (if (o.optInt("vote_count", 0) > 0) " (" + o.optInt("vote_count") + " votes)" else ""), if (tracked.contains(id)) "Suivi, pas téléchargé" else "", if (why.containsKey(id)) "Comme « " + why[id] + " »" else "").filter { it.isNotEmpty() }.joinToString(" · ")))
+                .put("track", tracked.contains(id)).put("why", why[id] ?: ""))
         }
         lastHidden = hidden
         return out.take(60)
@@ -420,25 +420,44 @@ object LibraryUi5 {
             lastL = l0
             val l = sorted(l0)
             list.removeAllViews()
-            info.text = if (l.isEmpty()) "Rien pour l'instant. " + (if (mode == "films" && !Tmdb.has(st)) Discover.lastInfo else "Réessaie dans une minute.") else "Touche un titre pour l'ajouter et lancer son téléchargement." + (if (Tmdb.has(st)) (if (Tmdb.lastHidden > 0) "\n" + Tmdb.lastHidden + " déjà dans ta bibliothèque, masqué(s)." else "") else if (mode == "films") "\n\n" + Discover.lastInfo else "")
+            info.text = if (l.isEmpty()) "Rien pour l'instant. " + (if (mode == "films" && !Tmdb.has(st)) Discover.lastInfo else "Réessaie dans une minute.") else "Touche un titre pour l'ajouter et lancer son téléchargement. Appui long : résumé complet." + (if (Tmdb.has(st)) (if (Tmdb.lastHidden > 0) "\n" + Tmdb.lastHidden + " déjà dans ta bibliothèque, masqué(s)." else "") else if (mode == "films") "\n\n" + Discover.lastInfo else "")
             for (o in l) {
                 val isShow = o.has("tvdbId")
                 val row = LinearLayout(a); row.orientation = LinearLayout.HORIZONTAL
-                row.setPadding(0, a.dp(8), 0, a.dp(8))
+                row.setPadding(a.dp(12), a.dp(12), a.dp(12), a.dp(12))
+                row.background = a.rounded(Pal.CARD, 14, Pal.BORDER)
+                val rlp = LinearLayout.LayoutParams(MATCH, WRAP); rlp.topMargin = a.dp(10)
+                row.layoutParams = rlp
                 val img = ImageView(a)
                 img.scaleType = ImageView.ScaleType.CENTER_CROP
                 img.setBackgroundColor(Pal.CARD2)
-                row.addView(img, LinearLayout.LayoutParams(a.dp(64), a.dp(96)))
+                a.roundView(img, 8)
+                row.addView(img, LinearLayout.LayoutParams(a.dp(88), a.dp(132)))
                 Img.load(posterUrl(o), img)
                 val t = LinearLayout(a); t.orientation = LinearLayout.VERTICAL
-                t.setPadding(a.dp(12), 0, 0, 0)
-                t.addView(a.tv(o.str("title") + (if (o.optInt("year") > 0) " (" + o.optInt("year") + ")" else ""), 15f, Pal.FG))
+                t.setPadding(a.dp(14), 0, 0, 0)
+                val ttl = a.tv(o.str("title"), 17f, Pal.FG)
+                ttl.typeface = android.graphics.Typeface.DEFAULT_BOLD
+                ttl.maxLines = 2; ttl.ellipsize = android.text.TextUtils.TruncateAt.END
+                t.addView(ttl)
+                val meta = FlowRow(a, a.dp(6), a.dp(6)); meta.setPadding(0, a.dp(6), 0, a.dp(6))
+                if (o.optInt("year") > 0) meta.addView(a.badge(o.optInt("year").toString(), Pal.MUTED))
+                if (o.optDouble("rating", 0.0) > 0) meta.addView(a.badge(String.format(java.util.Locale.FRANCE, "★ %.1f", o.optDouble("rating")), Pal.AMBER))
+                if (o.optInt("votes") > 0) meta.addView(a.badge(o.optInt("votes").toString() + " votes", Pal.MUTED))
+                if (o.optBoolean("track")) meta.addView(a.badge("Suivi, pas téléchargé", Pal.BLUE))
+                t.addView(meta)
                 if (o.str("sub").isNotEmpty()) t.addView(a.tv(o.str("sub"), 12f, Pal.BLUE))
-                val state = a.tv(o.str("overview").take(100) + "…", 12f, Pal.MUTED)
+                if (o.str("why").isNotEmpty()) t.addView(a.tv("Comme « " + o.str("why") + " »", 12f, Pal.BLUE))
+                val ov = o.str("overview").ifEmpty { "Pas de résumé." }
+                val state = a.tv(ov, 13f, Pal.MUTED)
+                state.maxLines = 4; state.ellipsize = android.text.TextUtils.TruncateAt.END
+                state.setLineSpacing(a.dp(2).toFloat(), 1f)
                 t.addView(state)
                 row.addView(t, LinearLayout.LayoutParams(0, WRAP, 1f))
+                row.setOnLongClickListener { state.maxLines = if (state.maxLines == 4) 40 else 4; true }
                 row.setOnClickListener {
                     row.setOnClickListener(null)
+                    state.maxLines = 4
                     state.text = "Ajout…"
                     thread {
                         val err = try { if (o.optBoolean("tv")) Tmdb.addTv(st, o.optInt("tmdbId")) else if (isShow) Shows.add(st, o.optInt("tvdbId")) else Sagas.add(st, o.optInt("tmdbId")) } catch (e: Exception) { e.message ?: "erreur" }
@@ -528,7 +547,9 @@ object LibraryUi5 {
         body.setPadding(a.dp(16), a.dp(8), a.dp(16), a.dp(8))
         val sv = ScrollView(a)
         sv.addView(body)
-        a.dialogBuilder().setTitle(title).setView(sv).setPositiveButton("Fermer", null).show()
+        val d = a.dialogBuilder().setTitle(title).setView(sv).setPositiveButton("Fermer", null).show()
+        // Presque plein écran : plus de place pour lire les fiches
+        d.window?.setLayout((a.resources.displayMetrics.widthPixels * 0.96).toInt(), (a.resources.displayMetrics.heightPixels * 0.9).toInt())
     }
 
     fun resume(a: Activity, st: Settings) {

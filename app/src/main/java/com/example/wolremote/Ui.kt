@@ -206,6 +206,15 @@ fun Activity.field(hint: String, value: String, type: Int = InputType.TYPE_CLASS
     return e
 }
 
+// Coins arrondis sur une image (affiches)
+fun Activity.roundView(v: android.view.View, radiusDp: Int) {
+    val r = dp(radiusDp).toFloat()
+    v.outlineProvider = object : android.view.ViewOutlineProvider() {
+        override fun getOutline(view: android.view.View, outline: android.graphics.Outline) { outline.setRoundRect(0, 0, view.width, view.height, r) }
+    }
+    v.clipToOutline = true
+}
+
 fun Activity.card(): LinearLayout {
     val c = LinearLayout(this)
     c.orientation = LinearLayout.VERTICAL
