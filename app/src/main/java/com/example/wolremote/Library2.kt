@@ -62,7 +62,7 @@ object Sagas {
         val key = st.get("kRadarr")
         val lk = Net.call("GET", "$base/api/v3/movie/lookup/tmdb?tmdbId=$tmdb", key, timeout = 30000)
         if (!lk.ok) return "introuvable (" + lk.code + ")"
-        val known = JSONObject(lk.body).optInt("id", 0)
+        val known = JSONObject(lk.body).optInt("id", 0).let { if (it > 0) it else radarrIdOf(st, tmdb) }
         if (known > 0) {   // déjà suivi dans Radarr : on lance simplement la recherche
             val c = Net.call("POST", "$base/api/v3/command", key, JSONObject().put("name", "MoviesSearch").put("movieIds", JSONArray().put(known)).toString(), 30000)
             return if (c.ok) null else "refusé (" + c.code + ") " + errMsg(c.body)
@@ -81,15 +81,26 @@ object Sagas {
     }
 }
 
+// Identifiant Radarr d'un film déjà suivi (0 = non suivi) : via la bibliothèque, plus fiable que « lookup »
+fun radarrIdOf(st: Settings, tmdb: Int): Int {
+    val key = st.get("kRadarr")
+    val base = st.base(7878)
+    try {
+        val r = Net.call("GET", "$base/api/v3/movie?tmdbId=$tmdb", key, timeout = 20000)
+        if (r.ok) { val a = JSONArray(r.body); for (i in 0 until a.length()) { val o = a.optJSONObject(i) ?: continue; if (o.optInt("tmdbId") == tmdb && o.optInt("id") > 0) return o.optInt("id") } }
+        val all = Net.call("GET", "$base/api/v3/movie", key, timeout = 30000)
+        if (all.ok) { val a = JSONArray(all.body); for (i in 0 until a.length()) { val o = a.optJSONObject(i) ?: continue; if (o.optInt("tmdbId") == tmdb) return o.optInt("id") } }
+    } catch (e: Exception) { }
+    return 0
+}
+
 // Retrait d'un film suivi : arrête ses téléchargements puis le retire de Radarr
 object MovieRemove {
     fun run(st: Settings, tmdb: Int, deleteFiles: Boolean): String? {
         val base = st.base(7878)
         val key = st.get("kRadarr")
         if (key.isEmpty()) return "clé Radarr manquante"
-        val lk = Net.call("GET", "$base/api/v3/movie/lookup/tmdb?tmdbId=$tmdb", key, timeout = 30000)
-        if (!lk.ok) return "introuvable (" + lk.code + ")"
-        val id = JSONObject(lk.body).optInt("id", 0)
+        val id = radarrIdOf(st, tmdb)
         if (id == 0) return "film non suivi"
         try {
             val q = Net.call("GET", "$base/api/v3/queue?pageSize=200", key, timeout = 15000)
