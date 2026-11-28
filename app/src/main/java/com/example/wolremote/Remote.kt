@@ -124,6 +124,7 @@ object RemoteUi {
         var alive = true
         updaters.clear()
         if (st.get("kTvIp").trim().isNotEmpty()) body.addView(tvPanel(a, st) { alive }, 1)
+        else body.addView(a.card().also { it.addView(a.tv("Télé Samsung", 17f, Pal.FG).also { t -> t.typeface = android.graphics.Typeface.DEFAULT_BOLD }); it.addView(a.tv("Renseigne l'adresse IP de la télé dans Réglages → Télévision Samsung pour avoir ici l'allumage, le volume et les flèches.", 13f, Pal.MUTED).also { t -> t.setPadding(0, a.dp(6), 0, 0) }) }, 1)
         a.bigDialog("Télécommande", body, "Fermer", false) { alive = false }
         thread {
             var sig = ""
@@ -137,6 +138,12 @@ object RemoteUi {
                             sig = ns
                             list.removeAllViews()
                             updaters.clear()
+                            if (s.isEmpty()) {
+                                val ph = a.card()
+                                ph.addView(a.tv("Jellyfin", 17f, Pal.FG).also { it.typeface = android.graphics.Typeface.DEFAULT_BOLD })
+                                ph.addView(a.tv("Aucune session : ouvre Jellyfin sur la télé (écran d'accueil). Les touches Accueil, flèches, lecture et volume apparaîtront ici dès qu'elle est détectée.", 13f, Pal.MUTED).also { it.setPadding(0, a.dp(6), 0, 0) })
+                                list.addView(ph)
+                            }
                             for (x in s) list.addView(card(a, st, x))
                         }
                         for (x in s) updaters[x.id]?.invoke(x)
@@ -385,7 +392,7 @@ object RemoteUi {
         // Navigation dans les menus de l'appli
         val nav = LinearLayout(a)
         nav.orientation = LinearLayout.VERTICAL
-        nav.visibility = android.view.View.GONE
+        nav.visibility = android.view.View.VISIBLE
         nav.addView(row(bt("Accueil") { Remote.command(st, x.id, "GoHome") }, bt("▲") { Remote.command(st, x.id, "MoveUp") }, bt("Retour") { Remote.command(st, x.id, "Back") }))
         nav.addView(row(bt("◀") { Remote.command(st, x.id, "MoveLeft") }, bt("OK") { Remote.command(st, x.id, "Select") }, bt("▶") { Remote.command(st, x.id, "MoveRight") }))
         nav.addView(row(bt("Recherche") { Remote.command(st, x.id, "GoToSearch") }, bt("▼") { Remote.command(st, x.id, "MoveDown") }, bt("Infos") { Remote.command(st, x.id, "ToggleOsd") }))
@@ -395,7 +402,7 @@ object RemoteUi {
             val t = txt.text.toString()
             if (t.isNotEmpty()) go { Remote.commandArgs(st, x.id, "SendString", JSONObject().put("String", t)) }
         }))
-        val navHead = a.btn2("Navigation ▾", Pal.MUTED, 40) {}
+        val navHead = a.btn2("Navigation ▴", Pal.MUTED, 40) {}
         navHead.setOnClickListener {
             val open = nav.visibility == android.view.View.GONE
             nav.visibility = if (open) android.view.View.VISIBLE else android.view.View.GONE
