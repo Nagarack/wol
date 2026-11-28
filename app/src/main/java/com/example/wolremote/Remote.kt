@@ -235,11 +235,12 @@ object RemoteUi {
         c.addView(a.tv("Navigation", 12f, Pal.MUTED).also { it.setPadding(0, a.dp(8), 0, 0) })
         c.addView(row(key("Accueil", "KEY_HOME"), key("▲", "KEY_UP", true), key("Retour", "KEY_RETURN")))
         c.addView(row(key("◀", "KEY_LEFT", true), key("OK", "KEY_ENTER"), key("▶", "KEY_RIGHT", true)))
-        c.addView(row(key("Source", "KEY_SOURCE"), key("▼", "KEY_DOWN", true), key("Menu", "KEY_MENU")))
+        c.addView(row(key("Source", "KEY_SOURCE"), key("▼", "KEY_DOWN", true), key("Réglages", "KEY_MENU")))
         c.addView(row(key("⏪", "KEY_REWIND", true, 46), key("▶❚❚", "KEY_PLAY", false, 46), key("⏩", "KEY_FF", true, 46)))
         val more = LinearLayout(a)
         more.orientation = LinearLayout.VERTICAL
         more.visibility = android.view.View.GONE
+        more.addView(row(key("Outils", "KEY_TOOLS", false, 48), key("Smart Hub", "KEY_CONTENTS", false, 48), key("Guide", "KEY_GUIDE", false, 48)))
         more.addView(row(key("Infos", "KEY_INFO", false, 48), key("Ch +", "KEY_CHUP", true, 48), key("Ch −", "KEY_CHDOWN", true, 48)))
         val moreBtn = a.btn2("Plus de touches ▾", Pal.MUTED, 40) {}
         moreBtn.setOnClickListener {
