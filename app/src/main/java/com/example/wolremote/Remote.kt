@@ -155,7 +155,7 @@ object RemoteUi {
     private fun compact(v: android.widget.Button) {
         v.setSingleLine(true)
         v.ellipsize = null
-        v.textSize = if (v.text.length > 7) 13f else 15f
+        v.textSize = if (v.text.length > 7) 13f else if (v.text.length > 3) 12f else 15f
         v.setPadding(v.context.resources.displayMetrics.density.let { (4 * it).toInt() }, v.paddingTop, (4 * v.context.resources.displayMetrics.density).toInt(), v.paddingBottom)
         v.gravity = android.view.Gravity.CENTER
     }
@@ -328,9 +328,9 @@ object RemoteUi {
         val playBtn = bt("⏯") { Remote.playing(st, x.id, "PlayPause") }
         playBox.addView(row(
             bt("⏮") { Remote.playing(st, x.id, "PreviousTrack") },
-            bt("−30 s") { Remote.seek(st, x.id, cur.pos - 300000000L) },
+            bt("−30s") { Remote.seek(st, x.id, cur.pos - 300000000L) },
             playBtn,
-            bt("+30 s") { Remote.seek(st, x.id, cur.pos + 300000000L) },
+            bt("+30s") { Remote.seek(st, x.id, cur.pos + 300000000L) },
             bt("⏭") { Remote.playing(st, x.id, "NextTrack") }
         ))
         playBox.addView(row(
