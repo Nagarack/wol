@@ -9,7 +9,8 @@ import kotlin.concurrent.thread
 
 // Télécommande : pilote les appareils connectés à Jellyfin (télévision, tablette…)
 object Remote {
-    class Sess(val id: String, val name: String, val title: String, val paused: Boolean, val pos: Long)
+    class Sess(val id: String, val name: String, val title: String, val paused: Boolean, val pos: Long, val run: Long = 0L,
+               val vol: Int = -1, val muted: Boolean = false, val audio: Int = -1, val sub: Int = -1, val streams: JSONArray = JSONArray())
 
     // Sessions vues par Jellyfin mais non pilotables (pour le diagnostic)
     var skipped: List<String> = emptyList()
@@ -31,7 +32,10 @@ object Remote {
             val ps = o.optJSONObject("PlayState")
             val title = if (np == null) "" else (if (np.str("Type") == "Episode") np.str("SeriesName") + " · " + np.str("Name") else np.str("Name"))
             out.add(Sess(o.str("Id"), o.str("DeviceName").ifEmpty { o.str("Client") }, title,
-                ps?.optBoolean("IsPaused", false) ?: false, ps?.optLong("PositionTicks", 0L) ?: 0L))
+                ps?.optBoolean("IsPaused", false) ?: false, ps?.optLong("PositionTicks", 0L) ?: 0L,
+                np?.optLong("RunTimeTicks", 0L) ?: 0L, if (ps == null || !ps.has("VolumeLevel") || ps.isNull("VolumeLevel")) -1 else ps.optInt("VolumeLevel"),
+                ps?.optBoolean("IsMuted", false) ?: false, if (ps == null || ps.isNull("AudioStreamIndex")) -1 else ps.optInt("AudioStreamIndex", -1),
+                if (ps == null || ps.isNull("SubtitleStreamIndex")) -1 else ps.optInt("SubtitleStreamIndex", -1), np?.optJSONArray("MediaStreams") ?: JSONArray()))
         }
         skipped = sk.distinct()
         return out
@@ -39,6 +43,9 @@ object Remote {
 
     fun playing(st: Settings, id: String, cmd: String): Boolean = Jellyfin.post(st, "/Sessions/$id/Playing/$cmd").ok
     fun command(st: Settings, id: String, cmd: String): Boolean = Jellyfin.post(st, "/Sessions/$id/Command/$cmd").ok
+    // Commande avec arguments (volume, piste audio, saisie au clavier…)
+    fun commandArgs(st: Settings, id: String, name: String, args: JSONObject): Boolean =
+        Jellyfin.postJson(st, "/Sessions/$id/Command", JSONObject().put("Name", name).put("Arguments", args).toString()).ok
     fun seek(st: Settings, id: String, ticks: Long): Boolean =
         Jellyfin.post(st, "/Sessions/$id/Playing/Seek?seekPositionTicks=" + maxOf(0L, ticks)).ok
     fun play(st: Settings, id: String, itemId: String, startTicks: Long = 0L): Boolean =
@@ -78,20 +85,23 @@ object RemoteUi {
         list.orientation = LinearLayout.VERTICAL
         body.addView(list)
         var alive = true
+        updaters.clear()
         a.bigDialog("Télécommande", body, "Fermer", false) { alive = false }
         thread {
             var sig = ""
             while (alive) {
                 try {
                     val s = Remote.sessions(st)
-                    val ns = s.joinToString("|") { it.id + it.title + it.paused }
+                    val ns = s.joinToString("|") { it.id + it.title + it.paused + it.audio + it.sub + it.muted }
                     a.runOnUiThread {
                         info.text = if (s.isEmpty()) "Aucun appareil pilotable." + (if (Remote.skipped.isNotEmpty()) "\nJellyfin voit, sans pouvoir les piloter : " + Remote.skipped.joinToString(", ") + ".\n\nLa télé est probablement en veille ou l'appli est fermée : allume la télé, ouvre Jellyfin et reste sur son écran d'accueil, puis ouvre à nouveau la télécommande." else "\nJellyfin ne voit aucune session récente : ouvre l'appli Jellyfin sur la télévision, connectée à ton compte, sur l'écran d'accueil.") else "Appareils connectés"
                         if (ns != sig) {
                             sig = ns
                             list.removeAllViews()
+                            updaters.clear()
                             for (x in s) list.addView(card(a, st, x))
                         }
+                        for (x in s) updaters[x.id]?.invoke(x)
                     }
                 } catch (e: Exception) {
                     a.runOnUiThread { info.text = "Jellyfin injoignable : " + e.message }
@@ -101,30 +111,147 @@ object RemoteUi {
         }
     }
 
+    private val updaters = HashMap<String, (Remote.Sess) -> Unit>()
+
+    private fun hms(ticks: Long): String {
+        val s = (ticks / 10000000L).toInt()
+        return if (s >= 3600) String.format("%d:%02d:%02d", s / 3600, (s % 3600) / 60, s % 60) else String.format("%d:%02d", s / 60, s % 60)
+    }
+
+    private fun bar(a: Activity, max: Int, change: (Int) -> Unit, drag: (Boolean) -> Unit): android.widget.SeekBar {
+        val b = android.widget.SeekBar(a)
+        b.max = max
+        b.progressTintList = android.content.res.ColorStateList.valueOf(Pal.BLUE)
+        b.thumbTintList = android.content.res.ColorStateList.valueOf(Pal.BLUE)
+        b.setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(s: android.widget.SeekBar, p: Int, fromUser: Boolean) {}
+            override fun onStartTrackingTouch(s: android.widget.SeekBar) { drag(true) }
+            override fun onStopTrackingTouch(s: android.widget.SeekBar) { drag(false); change(s.progress) }
+        })
+        return b
+    }
+
     private fun card(a: Activity, st: Settings, x: Remote.Sess): LinearLayout {
         val c = a.card()
-        c.addView(a.tv(x.name, 17f, Pal.FG).also { it.typeface = android.graphics.Typeface.DEFAULT_BOLD })
-        c.addView(a.tv(if (x.title.isEmpty()) "Rien en lecture" else (if (x.paused) "En pause · " else "") + x.title, 13f, Pal.MUTED))
-        fun bt(lbl: String, f: () -> Boolean): android.widget.Button = a.btn2(lbl, Pal.FG, 44) { thread { try { f() } catch (e: Exception) { } } }
-        fun row(vararg b: android.widget.Button) {
+        fun go(f: () -> Boolean) { thread { try { f() } catch (e: Exception) { } } }
+        fun bt(lbl: String, f: () -> Boolean): android.widget.Button = a.btn2(lbl, Pal.FG, 44) { go(f) }
+        fun row(vararg b: android.widget.Button): LinearLayout {
             val r = LinearLayout(a)
             r.orientation = LinearLayout.HORIZONTAL
             for (v in b) {
                 val lp = LinearLayout.LayoutParams(0, WRAP, 1f)
-                lp.leftMargin = a.dp(3); lp.rightMargin = a.dp(3)
-                v.layoutParams = lp.also { it.topMargin = a.dp(8) }
+                lp.leftMargin = a.dp(3); lp.rightMargin = a.dp(3); lp.topMargin = a.dp(8)
+                v.layoutParams = lp
                 r.addView(v)
             }
-            c.addView(r)
+            return r
         }
-        if (x.title.isNotEmpty()) {
-            row(bt(if (x.paused) "Lecture" else "Pause") { if (x.paused) Remote.playing(st, x.id, "Unpause") else Remote.playing(st, x.id, "Pause") },
-                bt("− 30 s") { Remote.seek(st, x.id, x.pos - 300000000L) },
-                bt("+ 30 s") { Remote.seek(st, x.id, x.pos + 300000000L) })
+
+        // En-tête : appareil, état, titre
+        val head = LinearLayout(a)
+        head.orientation = LinearLayout.HORIZONTAL
+        head.gravity = android.view.Gravity.CENTER_VERTICAL
+        head.addView(a.tv(x.name, 17f, Pal.FG).also { it.typeface = android.graphics.Typeface.DEFAULT_BOLD }, LinearLayout.LayoutParams(0, WRAP, 1f))
+        val state = LinearLayout(a)
+        head.addView(state)
+        c.addView(head)
+        val ttl = a.tv("", 14f, Pal.MUTED)
+        ttl.setPadding(0, a.dp(4), 0, 0)
+        c.addView(ttl)
+
+        // Barre de lecture
+        var dragPos = false
+        val seek = bar(a, 1000, { p -> if (x.run > 0) go { Remote.seek(st, x.id, x.run * p / 1000) } }, { dragPos = it })
+        val time = a.tv("", 12f, Pal.MUTED)
+        time.gravity = android.view.Gravity.CENTER
+        val playBox = LinearLayout(a)
+        playBox.orientation = LinearLayout.VERTICAL
+        playBox.addView(seek)
+        playBox.addView(time)
+        val playBtn = bt("⏯") { Remote.playing(st, x.id, "PlayPause") }
+        playBox.addView(row(
+            bt("⏮") { Remote.playing(st, x.id, "PreviousTrack") },
+            bt("−30 s") { Remote.seek(st, x.id, x.pos - 300000000L) },
+            playBtn,
+            bt("+30 s") { Remote.seek(st, x.id, x.pos + 300000000L) },
+            bt("⏭") { Remote.playing(st, x.id, "NextTrack") }
+        ))
+        playBox.addView(row(
+            bt("−10 min") { Remote.seek(st, x.id, x.pos - 6000000000L) },
+            a.btn2("Arrêter", Pal.RED, 44) { go { Remote.playing(st, x.id, "Stop") } },
+            bt("+10 min") { Remote.seek(st, x.id, x.pos + 6000000000L) }
+        ))
+        c.addView(playBox)
+
+        // Pistes audio et sous-titres
+        fun tracks(type: String, label: String, cur: Int, cmd: String): android.widget.Button = a.btn2(label, Pal.FG, 44) {
+            val names = ArrayList<String>(); val idx = ArrayList<Int>()
+            if (type == "Subtitle") { names.add("Aucun"); idx.add(-1) }
+            for (i in 0 until x.streams.length()) {
+                val o = x.streams.optJSONObject(i) ?: continue
+                if (o.str("Type") != type) continue
+                names.add((if (o.optInt("Index") == cur) "● " else "") + o.str("DisplayTitle").ifEmpty { o.str("Language").ifEmpty { "Piste " + o.optInt("Index") } })
+                idx.add(o.optInt("Index"))
+            }
+            if (names.isEmpty()) android.widget.Toast.makeText(a, "Aucune piste connue", android.widget.Toast.LENGTH_SHORT).show()
+            else a.dialogBuilder().setTitle(label).setItems(names.toTypedArray()) { _, i ->
+                go { Remote.commandArgs(st, x.id, cmd, JSONObject().put("Index", idx[i].toString())) }
+            }.show()
         }
-        row(bt("Vol −") { Remote.command(st, x.id, "VolumeDown") },
-            bt("Vol +") { Remote.command(st, x.id, "VolumeUp") },
-            bt("Stop") { Remote.playing(st, x.id, "Stop") })
+        val trackRow = row(tracks("Audio", "Audio", x.audio, "SetAudioStreamIndex"), tracks("Subtitle", "Sous-titres", x.sub, "SetSubtitleStreamIndex"))
+        c.addView(trackRow)
+
+        // Volume
+        var dragVol = false
+        val volBar = bar(a, 100, { p -> go { Remote.commandArgs(st, x.id, "SetVolume", JSONObject().put("Volume", p.toString())) } }, { dragVol = it })
+        val volRow = LinearLayout(a)
+        volRow.orientation = LinearLayout.HORIZONTAL
+        volRow.gravity = android.view.Gravity.CENTER_VERTICAL
+        volRow.setPadding(0, a.dp(10), 0, 0)
+        volRow.addView(a.tv("Volume", 13f, Pal.MUTED))
+        volRow.addView(volBar, LinearLayout.LayoutParams(0, WRAP, 1f))
+        val mute = a.btn2("Muet", Pal.FG, 40) { go { Remote.command(st, x.id, "ToggleMute") } }
+        mute.layoutParams = LinearLayout.LayoutParams(WRAP, WRAP)
+        volRow.addView(mute)
+        c.addView(volRow)
+        c.addView(row(bt("Vol −") { Remote.command(st, x.id, "VolumeDown") }, bt("Vol +") { Remote.command(st, x.id, "VolumeUp") }))
+
+        // Navigation dans les menus de l'appli
+        val nav = LinearLayout(a)
+        nav.orientation = LinearLayout.VERTICAL
+        nav.visibility = android.view.View.GONE
+        nav.addView(row(bt("Accueil") { Remote.command(st, x.id, "GoHome") }, bt("▲") { Remote.command(st, x.id, "MoveUp") }, bt("Retour") { Remote.command(st, x.id, "Back") }))
+        nav.addView(row(bt("◀") { Remote.command(st, x.id, "MoveLeft") }, bt("OK") { Remote.command(st, x.id, "Select") }, bt("▶") { Remote.command(st, x.id, "MoveRight") }))
+        nav.addView(row(bt("Recherche") { Remote.command(st, x.id, "GoToSearch") }, bt("▼") { Remote.command(st, x.id, "MoveDown") }, bt("Infos") { Remote.command(st, x.id, "ToggleOsd") }))
+        val txt = a.field("Texte à saisir (recherche…)", "")
+        nav.addView(txt)
+        nav.addView(row(a.btn2("Envoyer le texte", Pal.FG, 44) {
+            val t = txt.text.toString()
+            if (t.isNotEmpty()) go { Remote.commandArgs(st, x.id, "SendString", JSONObject().put("String", t)) }
+        }))
+        val navHead = a.btn2("Navigation ▾", Pal.MUTED, 40) {}
+        navHead.setOnClickListener {
+            val open = nav.visibility == android.view.View.GONE
+            nav.visibility = if (open) android.view.View.VISIBLE else android.view.View.GONE
+            navHead.text = if (open) "Navigation ▴" else "Navigation ▾"
+        }
+        c.addView(navHead)
+        c.addView(nav)
+
+        // Mise à jour en place (sans reconstruire la carte) : état, position, volume
+        val update: (Remote.Sess) -> Unit = { s ->
+            state.removeAllViews()
+            state.addView(a.badge(if (s.title.isEmpty()) "Rien en lecture" else if (s.paused) "En pause" else "En lecture", if (s.title.isEmpty()) Pal.MUTED else if (s.paused) Pal.AMBER else Pal.GREEN))
+            ttl.text = s.title
+            ttl.visibility = if (s.title.isEmpty()) android.view.View.GONE else android.view.View.VISIBLE
+            playBox.visibility = if (s.title.isEmpty()) android.view.View.GONE else android.view.View.VISIBLE
+            trackRow.visibility = if (s.title.isEmpty()) android.view.View.GONE else android.view.View.VISIBLE
+            if (!dragPos && s.run > 0) { seek.progress = (s.pos * 1000 / s.run).toInt(); time.text = hms(s.pos) + " / " + hms(s.run) }
+            if (!dragVol && s.vol >= 0) volBar.progress = s.vol
+            mute.text = if (s.muted) "Son" else "Muet"
+        }
+        update(x)
+        updaters[x.id] = update
         return c
     }
 }

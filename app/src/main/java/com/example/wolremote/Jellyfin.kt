@@ -20,6 +20,12 @@ object Jellyfin {
         return Net.call("POST", st.base(8096) + path, json = "", timeout = 30000, headers = hd)
     }
 
+    fun postJson(st: Settings, path: String, json: String): Resp {
+        val key = st.get("kJellyfin").trim()
+        val hd = mapOf("Authorization" to "MediaBrowser Token=\"$key\"", "X-Emby-Token" to key)
+        return Net.call("POST", st.base(8096) + path, json = json, timeout = 30000, headers = hd)
+    }
+
     fun refresh(st: Settings): String {
         val key = st.get("kJellyfin").trim()
         if (key.isEmpty()) return "Clé API Jellyfin manquante (Réglages)."
