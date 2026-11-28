@@ -8,6 +8,7 @@ import android.graphics.RectF
 import android.graphics.Typeface
 import android.view.Gravity
 import android.view.View
+import android.widget.LinearLayout
 import org.json.JSONObject
 import java.util.Calendar
 import java.util.Locale
