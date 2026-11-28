@@ -22,7 +22,7 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 # WOL_SERVER : ce fichier ne contient AUCUN secret. PIN, secret, MAC, IP... sont dans ~/wol_config.json
-VERSION = 9
+VERSION = 10
 UPDATE_BASE = "https://raw.githubusercontent.com/Nagarack/wol/main/server/"
 CONFIG_FILE = os.path.expanduser("~/wol_config.json")
 # ================= CONFIG (valeurs par défaut, surchargées par ~/wol_config.json) =================
@@ -288,11 +288,8 @@ def _tv_connect(ip, port, use_ssl, timeout):
     except Exception:
         ws.close()
         raise
-    if port == 8002:
-        try:
-            _remember_macs(ip)
-        except Exception:
-            pass
+    if port == 8002:   # en arrière-plan : ne ralentit pas la première touche
+        threading.Thread(target=lambda: _remember_macs(ip), daemon=True).start()
     ws.t = time.time()
     return ws
 
@@ -302,12 +299,12 @@ _tv_lock = threading.Lock()
 
 
 def tv_keys(ip, keys, port=8002, use_ssl=True, timeout=None):
-    """Envoie des touches de télécommande à une télé Samsung (connexion gardée ouverte 45 s : navigation réactive).
+    """Envoie des touches de télécommande à une télé Samsung (connexion gardée ouverte 2 min : navigation réactive).
     Premier usage : accepter la demande qui s'affiche sur la télé."""
     with _tv_lock:
         for attempt in (0, 1):
             ws = _tv_conn.get(ip)
-            if ws is not None and time.time() - ws.t > 45:
+            if ws is not None and time.time() - ws.t > 120:
                 ws.close()
                 ws = None
             try:
@@ -797,6 +794,9 @@ class WebHandler(BaseHTTPRequestHandler):
             return self._json(200, {"online": is_online()})
         if self.path == "/power":
             return self._json(200, power_report())
+        if self.path.startswith("/tv/status"):
+            ip = self.path.split("ip=", 1)[1].split("&")[0] if "ip=" in self.path else ""
+            return self._json(200, {"on": bool(ip) and tv_info(ip) is not None})
         if self.path == "/sleep/status":
             return self._json(200, sleep_status())
         if self.path == "/consume-wake":  # appelé par le PC au démarrage
@@ -885,7 +885,7 @@ class WebHandler(BaseHTTPRequestHandler):
             if self.path == "/tv/key":
                 ip = str(data.get("ip", "")).strip()
                 keys = [k for k in data.get("keys", []) if isinstance(k, str) and k.startswith("KEY_")][:20]
-                if not ip or not keys:
+                if not ip or (not keys and not data.get("warm")):
                     return self._json(400, {"message": "Adresse de la télé manquante"})
                 try:
                     tv_keys(ip, keys)

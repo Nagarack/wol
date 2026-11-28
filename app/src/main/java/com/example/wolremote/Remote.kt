@@ -69,6 +69,18 @@ object Remote {
         } catch (e: Exception) { Pair(false, "Tablette injoignable") }
     }
 
+    // Télé allumée ? (null = inconnu)
+    fun tvOn(st: Settings): Boolean? = try {
+        val ip = st.get("kTvIp").trim()
+        val r = Net.call("GET", st.tablet() + "/tv/status?ip=" + ip, timeout = 8000)
+        if (r.ok) JSONObject(r.body).optBoolean("on") else null
+    } catch (e: Exception) { null }
+
+    // Ouvre la connexion à la télé à l'avance
+    fun tvWarm(st: Settings) {
+        try { Net.call("POST", st.tablet() + "/tv/key", json = JSONObject().put("pin", st.pin()).put("ip", st.get("kTvIp").trim()).put("keys", JSONArray()).put("warm", true).toString(), timeout = 45000) } catch (e: Exception) { }
+    }
+
     fun commandArgs(st: Settings, id: String, name: String, args: JSONObject): Boolean =
         Jellyfin.postJson(st, "/Sessions/$id/Command", JSONObject().put("Name", name).put("Arguments", args).toString()).ok
     fun seek(st: Settings, id: String, ticks: Long): Boolean =
@@ -111,7 +123,7 @@ object RemoteUi {
         body.addView(list)
         var alive = true
         updaters.clear()
-        if (st.get("kTvIp").trim().isNotEmpty()) body.addView(tvPanel(a, st), 1)
+        if (st.get("kTvIp").trim().isNotEmpty()) body.addView(tvPanel(a, st) { alive }, 1)
         a.bigDialog("Télécommande", body, "Fermer", false) { alive = false }
         thread {
             var sig = ""
@@ -132,57 +144,117 @@ object RemoteUi {
                 } catch (e: Exception) {
                     a.runOnUiThread { info.text = "Jellyfin injoignable : " + e.message }
                 }
-                Thread.sleep(3000)
+                Thread.sleep(2000)
             }
         }
     }
 
     private val updaters = HashMap<String, (Remote.Sess) -> Unit>()
 
-    // Télé Samsung : allumer, éteindre, volume. Disponible même quand aucune session Jellyfin n'est active.
-    private fun tvPanel(a: Activity, st: Settings): LinearLayout {
+    // Les touches de la télé partent dans l'ordre, une à la fois ; si l'envoi prend du retard on abandonne les plus anciennes
+    private val tvQueue = java.util.concurrent.ThreadPoolExecutor(1, 1, 0L, java.util.concurrent.TimeUnit.MILLISECONDS, java.util.concurrent.LinkedBlockingQueue<Runnable>())
+
+    // Télé Samsung : allumer, éteindre, volume, navigation. Disponible même quand aucune session Jellyfin n'est active.
+    private fun tvPanel(a: Activity, st: Settings, alive: () -> Boolean): LinearLayout {
         val c = a.card()
-        c.addView(a.tv("Télé Samsung", 17f, Pal.FG).also { it.typeface = android.graphics.Typeface.DEFAULT_BOLD })
+        val hdr = LinearLayout(a)
+        hdr.orientation = LinearLayout.HORIZONTAL
+        hdr.gravity = android.view.Gravity.CENTER_VERTICAL
+        hdr.addView(a.tv("Télé Samsung", 17f, Pal.FG).also { it.typeface = android.graphics.Typeface.DEFAULT_BOLD }, LinearLayout.LayoutParams(0, WRAP, 1f))
+        val stateBox = LinearLayout(a)
+        hdr.addView(stateBox)
+        c.addView(hdr)
         val msg = a.tv("", 12f, Pal.MUTED)
-        fun send(label: String, f: () -> String?) {
-            msg.text = "$label…"
-            thread {
-                val err = try { f() } catch (e: Exception) { e.message ?: "erreur" }
-                a.runOnUiThread { msg.text = err ?: "OK" ; msg.setTextColor(if (err == null) Pal.GREEN else Pal.RED) }
+        msg.setPadding(0, a.dp(6), 0, 0)
+        c.addView(msg)
+        val ui = android.os.Handler(android.os.Looper.getMainLooper())
+        val keyBtns = ArrayList<android.widget.Button>()
+
+        fun setMsg(t: String, ok: Boolean?) { msg.text = t; msg.setTextColor(if (ok == null) Pal.MUTED else if (ok) Pal.GREEN else Pal.RED) }
+        fun fire(label: String, keys: List<String>) {
+            if (tvQueue.queue.size > 3) return
+            tvQueue.execute {
+                val err = Remote.tvKeys(st, keys)
+                a.runOnUiThread { if (err != null) setMsg(err, false) else setMsg(label, true) }
             }
         }
-        fun keys(label: String, vararg k: String): () -> Unit = { send(label) { Remote.tvKeys(st, k.toList()) } }
         fun row(vararg b: android.widget.Button): LinearLayout {
             val r = LinearLayout(a)
             r.orientation = LinearLayout.HORIZONTAL
             for (v in b) { v.layoutParams = LinearLayout.LayoutParams(0, WRAP, 1f).also { it.leftMargin = a.dp(3); it.rightMargin = a.dp(3); it.topMargin = a.dp(8) }; r.addView(v) }
             return r
         }
-        c.addView(row(
-            a.btn("Allumer", Pal.GREEN, 44) {
-                msg.text = "Allumage… (jusqu'à 15 s)"
-                msg.setTextColor(Pal.MUTED)
-                thread {
-                    val (ok, m) = Remote.tvWake(st)
-                    a.runOnUiThread { msg.text = m; msg.setTextColor(if (ok) Pal.GREEN else Pal.RED) }
+        // Touche avec retour tactile immédiat ; maintenue, elle se répète (volume, flèches)
+        fun key(label: String, k: String, repeat: Boolean = false, h: Int = 56): android.widget.Button {
+            val b = a.btn2(label, Pal.FG, h) {}
+            var rep: Runnable? = null
+            b.setOnTouchListener { v, e ->
+                when (e.action) {
+                    android.view.MotionEvent.ACTION_DOWN -> {
+                        v.isPressed = true
+                        v.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
+                        fire(label, listOf(k))
+                        if (repeat) {
+                            val r = object : Runnable { override fun run() { fire(label, listOf(k)); ui.postDelayed(this, 170) } }
+                            rep = r
+                            ui.postDelayed(r, 420)
+                        }
+                    }
+                    android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> { v.isPressed = false; rep?.let { ui.removeCallbacks(it) }; rep = null }
                 }
-            },
-            a.btn2("Éteindre", Pal.RED, 44) {
-                a.dialogBuilder().setMessage("Éteindre la télévision ?").setPositiveButton("Éteindre") { _, _ -> keys("Extinction", "KEY_POWER")() }.setNegativeButton("Annuler", null).show()
-            }))
-        c.addView(row(a.btn2("Vol −", Pal.FG, 44) { keys("Volume", "KEY_VOLDOWN")() }, a.btn2("Vol +", Pal.FG, 44) { keys("Volume", "KEY_VOLUP")() }, a.btn2("Muet", Pal.FG, 44) { keys("Muet", "KEY_MUTE")() }))
-        c.addView(row(a.btn2("Vol −5", Pal.FG, 44) { keys("Volume", "KEY_VOLDOWN", "KEY_VOLDOWN", "KEY_VOLDOWN", "KEY_VOLDOWN", "KEY_VOLDOWN")() },
-            a.btn2("Vol +5", Pal.FG, 44) { keys("Volume", "KEY_VOLUP", "KEY_VOLUP", "KEY_VOLUP", "KEY_VOLUP", "KEY_VOLUP")() }))
-        // Pavé de navigation : touches de la télécommande Samsung (menus, Smart Hub, sources)
-        fun k(label: String, key: String, h: Int = 48) = a.btn2(label, Pal.FG, h) { keys(label, key)() }
-        c.addView(a.tv("Navigation", 12f, Pal.MUTED).also { it.setPadding(0, a.dp(14), 0, 0) })
-        c.addView(row(k("Accueil", "KEY_HOME"), k("▲", "KEY_UP"), k("Retour", "KEY_RETURN")))
-        c.addView(row(k("◀", "KEY_LEFT"), k("OK", "KEY_ENTER"), k("▶", "KEY_RIGHT")))
-        c.addView(row(k("Source", "KEY_SOURCE"), k("▼", "KEY_DOWN"), k("Menu", "KEY_MENU")))
-        c.addView(row(k("⏪", "KEY_REWIND"), k("▶❚❚", "KEY_PLAY"), k("⏩", "KEY_FF")))
-        c.addView(row(k("Infos", "KEY_INFO"), k("Chaîne +", "KEY_CHUP"), k("Chaîne −", "KEY_CHDOWN")))
-        msg.setPadding(0, a.dp(8), 0, 0)
-        c.addView(msg)
+                true
+            }
+            keyBtns.add(b)
+            return b
+        }
+        val wake = a.btn("Allumer", Pal.GREEN, 52) {
+            setMsg("Allumage… (jusqu'à 15 s)", null)
+            thread {
+                val (ok, m) = Remote.tvWake(st)
+                a.runOnUiThread { setMsg(m, ok) }
+            }
+        }
+        val off = a.btn2("Éteindre", Pal.RED, 52) {
+            a.dialogBuilder().setMessage("Éteindre la télévision ?").setPositiveButton("Éteindre") { _, _ -> fire("Extinction envoyée", listOf("KEY_POWER")) }.setNegativeButton("Annuler", null).show()
+        }
+        c.addView(row(wake, off))
+        c.addView(a.tv("Volume", 12f, Pal.MUTED).also { it.setPadding(0, a.dp(14), 0, 0) })
+        c.addView(row(key("Vol −", "KEY_VOLDOWN", true, 60), key("Muet", "KEY_MUTE", false, 60), key("Vol +", "KEY_VOLUP", true, 60)))
+        c.addView(a.tv("Navigation (maintiens une flèche pour répéter)", 12f, Pal.MUTED).also { it.setPadding(0, a.dp(14), 0, 0) })
+        c.addView(row(key("Accueil", "KEY_HOME"), key("▲", "KEY_UP", true), key("Retour", "KEY_RETURN")))
+        c.addView(row(key("◀", "KEY_LEFT", true), key("OK", "KEY_ENTER"), key("▶", "KEY_RIGHT", true)))
+        c.addView(row(key("Source", "KEY_SOURCE"), key("▼", "KEY_DOWN", true), key("Menu", "KEY_MENU")))
+        c.addView(row(key("⏪", "KEY_REWIND", true, 52), key("▶❚❚", "KEY_PLAY", false, 52), key("⏩", "KEY_FF", true, 52)))
+        val more = LinearLayout(a)
+        more.orientation = LinearLayout.VERTICAL
+        more.visibility = android.view.View.GONE
+        more.addView(row(key("Infos", "KEY_INFO", false, 48), key("Chaîne +", "KEY_CHUP", true, 48), key("Chaîne −", "KEY_CHDOWN", true, 48)))
+        val moreBtn = a.btn2("Plus de touches ▾", Pal.MUTED, 40) {}
+        moreBtn.setOnClickListener {
+            val open = more.visibility == android.view.View.GONE
+            more.visibility = if (open) android.view.View.VISIBLE else android.view.View.GONE
+            moreBtn.text = if (open) "Moins de touches ▴" else "Plus de touches ▾"
+        }
+        c.addView(moreBtn)
+        c.addView(more)
+
+        // État de la télé : badge, boutons utiles seulement ; la connexion est préparée dès l'ouverture pour que la 1re touche soit instantanée
+        var warmed = false
+        thread {
+            while (alive()) {
+                val on = Remote.tvOn(st)
+                a.runOnUiThread {
+                    stateBox.removeAllViews()
+                    stateBox.addView(a.badge(if (on == null) "Inconnu" else if (on) "Allumée" else "Éteinte", if (on == true) Pal.GREEN else Pal.MUTED))
+                    wake.alpha = if (on == true) 0.4f else 1f
+                    off.alpha = if (on == false) 0.4f else 1f
+                    for (b in keyBtns) b.alpha = if (on == false) 0.4f else 1f
+                }
+                if (on == true && !warmed) { warmed = true; Remote.tvWarm(st) }
+                if (on != true) warmed = false
+                Thread.sleep(2000)
+            }
+        }
         return c
     }
 
