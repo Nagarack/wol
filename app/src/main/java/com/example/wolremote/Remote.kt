@@ -151,6 +151,15 @@ object RemoteUi {
 
     private val updaters = HashMap<String, (Remote.Sess) -> Unit>()
 
+    // Boutons de rangée : une seule ligne, marges réduites, jamais de mot coupé
+    private fun compact(v: android.widget.Button) {
+        v.setSingleLine(true)
+        v.ellipsize = null
+        v.textSize = if (v.text.length > 7) 13f else 15f
+        v.setPadding(v.context.resources.displayMetrics.density.let { (4 * it).toInt() }, v.paddingTop, (4 * v.context.resources.displayMetrics.density).toInt(), v.paddingBottom)
+        v.gravity = android.view.Gravity.CENTER
+    }
+
     // Les touches de la télé partent dans l'ordre, une à la fois ; si l'envoi prend du retard on abandonne les plus anciennes
     private val tvQueue = java.util.concurrent.ThreadPoolExecutor(1, 1, 0L, java.util.concurrent.TimeUnit.MILLISECONDS, java.util.concurrent.LinkedBlockingQueue<Runnable>())
 
@@ -181,7 +190,7 @@ object RemoteUi {
         fun row(vararg b: android.widget.Button): LinearLayout {
             val r = LinearLayout(a)
             r.orientation = LinearLayout.HORIZONTAL
-            for (v in b) { v.layoutParams = LinearLayout.LayoutParams(0, WRAP, 1f).also { it.leftMargin = a.dp(3); it.rightMargin = a.dp(3); it.topMargin = a.dp(8) }; r.addView(v) }
+            for (v in b) { compact(v); v.layoutParams = LinearLayout.LayoutParams(0, WRAP, 1f).also { it.leftMargin = a.dp(3); it.rightMargin = a.dp(3); it.topMargin = a.dp(8) }; r.addView(v) }
             return r
         }
         // Touche avec retour tactile immédiat ; maintenue, elle se répète (volume, flèches)
@@ -228,7 +237,7 @@ object RemoteUi {
         val more = LinearLayout(a)
         more.orientation = LinearLayout.VERTICAL
         more.visibility = android.view.View.GONE
-        more.addView(row(key("Infos", "KEY_INFO", false, 48), key("Chaîne +", "KEY_CHUP", true, 48), key("Chaîne −", "KEY_CHDOWN", true, 48)))
+        more.addView(row(key("Infos", "KEY_INFO", false, 48), key("Ch +", "KEY_CHUP", true, 48), key("Ch −", "KEY_CHDOWN", true, 48)))
         val moreBtn = a.btn2("Plus de touches ▾", Pal.MUTED, 40) {}
         moreBtn.setOnClickListener {
             val open = more.visibility == android.view.View.GONE
@@ -285,6 +294,7 @@ object RemoteUi {
             val r = LinearLayout(a)
             r.orientation = LinearLayout.HORIZONTAL
             for (v in b) {
+                compact(v)
                 val lp = LinearLayout.LayoutParams(0, WRAP, 1f)
                 lp.leftMargin = a.dp(3); lp.rightMargin = a.dp(3); lp.topMargin = a.dp(8)
                 v.layoutParams = lp
