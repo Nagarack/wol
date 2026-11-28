@@ -22,7 +22,7 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 # WOL_SERVER : ce fichier ne contient AUCUN secret. PIN, secret, MAC, IP... sont dans ~/wol_config.json
-VERSION = 4
+VERSION = 5
 UPDATE_BASE = "https://raw.githubusercontent.com/Nagarack/wol/main/server/"
 CONFIG_FILE = os.path.expanduser("~/wol_config.json")
 # ================= CONFIG (valeurs par défaut, surchargées par ~/wol_config.json) =================
@@ -116,6 +116,107 @@ def remote_shutdown(path="/shutdown") -> None:
 
 
 
+# ---------------- Télé Samsung (Tizen) : volume, muet, extinction via l'API réseau de la télé ----------------
+TV_FILE = os.path.expanduser("~/wol_tv.json")
+
+
+def _tv_tokens():
+    try:
+        with open(TV_FILE) as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+class _WS:
+    """Client WebSocket minimal (stdlib uniquement)."""
+
+    def __init__(self, ip, port, path, use_ssl, timeout):
+        import base64
+        import ssl
+        raw = socket.create_connection((ip, port), timeout=timeout)
+        if use_ssl:
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+            raw = ctx.wrap_socket(raw, server_hostname=ip)
+        self.s = raw
+        self.buf = b""
+        key = base64.b64encode(os.urandom(16)).decode()
+        raw.sendall((f"GET {path} HTTP/1.1\r\nHost: {ip}:{port}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
+                     f"Sec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\n\r\n").encode())
+        while b"\r\n\r\n" not in self.buf:
+            self.buf += self._recv()
+        head, self.buf = self.buf.split(b"\r\n\r\n", 1)
+        if b" 101 " not in head.split(b"\r\n")[0]:
+            raise Exception("la télé a refusé la connexion")
+
+    def _recv(self):
+        d = self.s.recv(4096)
+        if not d:
+            raise Exception("connexion fermée par la télé")
+        return d
+
+    def _need(self, n):
+        while len(self.buf) < n:
+            self.buf += self._recv()
+        out, self.buf = self.buf[:n], self.buf[n:]
+        return out
+
+    def read(self):
+        b0, b1 = self._need(2)
+        n = b1 & 127
+        if n == 126:
+            n = int.from_bytes(self._need(2), "big")
+        elif n == 127:
+            n = int.from_bytes(self._need(8), "big")
+        return b0 & 15, self._need(n)
+
+    def send(self, text):
+        p = text.encode()
+        mask = os.urandom(4)
+        n = len(p)
+        head = bytes([0x81]) + (bytes([0x80 | n]) if n < 126 else bytes([0x80 | 126]) + n.to_bytes(2, "big"))
+        self.s.sendall(head + mask + bytes(c ^ mask[i % 4] for i, c in enumerate(p)))
+
+    def close(self):
+        try:
+            self.s.close()
+        except Exception:
+            pass
+
+
+def tv_keys(ip, keys, port=8002, use_ssl=True):
+    """Envoie des touches de télécommande à une télé Samsung. Premier usage : accepter la demande sur la télé."""
+    import base64
+    toks = _tv_tokens()
+    token = toks.get(ip, "")
+    name = base64.b64encode(b"Mon PC").decode()
+    path = "/api/v2/channels/samsung.remote.control?name=" + name + ("&token=" + token if token else "")
+    ws = _WS(ip, port, path, use_ssl, 35 if not token else 10)
+    try:
+        while True:
+            op, data = ws.read()
+            if op != 1:
+                continue
+            m = json.loads(data.decode("utf-8", "ignore"))
+            ev = m.get("event", "")
+            if ev == "ms.channel.connect":
+                t = (m.get("data") or {}).get("token")
+                if t and t != token:
+                    toks[ip] = t
+                    with open(TV_FILE, "w") as f:
+                        json.dump(toks, f)
+                break
+            if ev in ("ms.channel.timeOut", "ms.error"):
+                raise Exception("connexion refusée : accepte la demande sur la télé")
+        for k in keys:
+            ws.send(json.dumps({"method": "ms.remote.control", "params": {"Cmd": "Click", "DataOfCmd": k, "Option": "false", "TypeOfRemote": "SendRemoteKey"}}))
+            time.sleep(0.25)
+    finally:
+        ws.close()
+
+
 # ---------------- Minuteur d'arrêt : télé / PC (tourne sur la tablette, même appli fermée) ----------------
 SLEEP_FILE = os.path.expanduser("~/wol_sleep.json")
 sleep_plan = None          # plan actif (ou None)
@@ -160,8 +261,8 @@ def sleep_start(d):
     mode = d.get("mode")
     val = int(d.get("value") or 0)
     now = time.time()
-    p = {"mode": mode, "value": val, "actions": [a for a in d.get("actions", []) if a in ("stop", "screens", "shutdown")],
-         "key": d.get("jf_key", ""), "created": now, "seen": [], "idle_since": None, "armed": False, "countdown": None}
+    p = {"mode": mode, "value": val, "actions": [a for a in d.get("actions", []) if a in ("stop", "screens", "shutdown", "tv")],
+         "key": d.get("jf_key", ""), "tv_ip": d.get("tv_ip", ""), "created": now, "seen": [], "idle_since": None, "armed": False, "countdown": None}
     if mode == "timer":
         p["deadline"] = now + val * 60
     sleep_plan = p
@@ -193,6 +294,11 @@ def sleep_run(p):
         try:
             req = urllib.request.Request(f"http://{PC_IP}:{AGENT_PORT}/screens/off", data=b"", method="POST", headers={"X-Secret": SECRET})
             urllib.request.urlopen(req, timeout=10).read()
+        except Exception:
+            pass
+    if "tv" in p["actions"] and p.get("tv_ip"):
+        try:
+            tv_keys(p["tv_ip"], ["KEY_POWER"])
         except Exception:
             pass
     if "shutdown" in p["actions"]:
@@ -660,6 +766,16 @@ class WebHandler(BaseHTTPRequestHandler):
                 elif os.path.exists(VAC_FILE):
                     os.remove(VAC_FILE)
                 return self._json(200, {"message": "Mode vacances " + ("activé" if vacation else "désactivé")})
+            if self.path == "/tv/key":
+                ip = str(data.get("ip", "")).strip()
+                keys = [k for k in data.get("keys", []) if isinstance(k, str) and k.startswith("KEY_")][:20]
+                if not ip or not keys:
+                    return self._json(400, {"message": "Adresse de la télé manquante"})
+                try:
+                    tv_keys(ip, keys)
+                except Exception as e:
+                    return self._json(200, {"ok": False, "message": f"Télé injoignable ou refus : {e}"})
+                return self._json(200, {"ok": True, "message": "OK"})
             if self.path == "/sleep/set":
                 if data.get("mode") not in ("timer", "end", "episodes", "idle"):
                     return self._json(400, {"message": "Mode inconnu"})

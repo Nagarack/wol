@@ -140,6 +140,10 @@ class SettingsTab(private val a: Activity, private val st: Settings) {
         add("Adresse sur le réseau local", "host", uri)
         add("Adresse Tailscale (IP ou nom)", "host2", uri)
 
+        grp("Télévision Samsung", listOf("kTvIp"))
+        note("Permet de régler le volume, le muet et d'éteindre la télé depuis la télécommande. Sur la télé : Réglages, Général, Gestionnaire de périphériques externes, Gestionnaire de connexion des appareils, mets « Notification d'accès » sur « Première fois seulement ». Au premier envoi, accepte la demande qui s'affiche à l'écran.")
+        add("Adresse IP de la télé (ex : 192.168.1.40)", "kTvIp", uri)
+
         heading("Services")
         grp("Clés API", listOf("kProwlarr", "kRadarr", "kSonarr", "kTmdb", "kJellyfin"))
         add("Prowlarr", "kProwlarr", pw)

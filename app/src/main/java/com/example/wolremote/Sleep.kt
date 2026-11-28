@@ -17,7 +17,7 @@ object Sleep {
         if (cd >= 0) return "Extinction dans $cd s…"
         val v = j.optInt("value")
         val acts = j.optJSONArray("actions") ?: JSONArray()
-        val names = (0 until acts.length()).map { when (acts.optString(it)) { "stop" -> "arrêt lecture"; "screens" -> "écrans"; else -> "PC" } }
+        val names = (0 until acts.length()).map { when (acts.optString(it)) { "stop" -> "arrêt lecture"; "screens" -> "écrans"; "tv" -> "télé"; else -> "PC" } }
         val what = when (j.optString("mode")) {
             "timer" -> { val m = (j.optInt("remaining") + 59) / 60; "dans " + (if (m >= 60) (m / 60).toString() + " h " + (m % 60) + " min" else "$m min") }
             "end" -> "à la fin de la lecture"
@@ -60,7 +60,7 @@ object Sleep {
             val opts = when (mode) { "timer" -> listOf(30, 45, 60, 90, 120, 180); "episodes" -> listOf(1, 2, 3, 4, 5); "idle" -> listOf(10, 20, 30, 60); else -> emptyList() }
             for (o in opts) vals.addView(chip(if (mode == "episodes") (if (o == 1) "1 épisode" else "$o épisodes") else (if (o >= 60 && o % 60 == 0) "${o / 60} h" else "$o min"), value == o) { value = o; render() })
             vals.visibility = if (opts.isEmpty()) android.view.View.GONE else android.view.View.VISIBLE
-            for ((k, l) in listOf("stop" to "Arrêter la lecture", "screens" to "Éteindre les écrans", "shutdown" to "Éteindre le PC"))
+            for ((k, l) in listOf("stop" to "Arrêter la lecture", "screens" to "Éteindre les écrans", "tv" to "Éteindre la télé", "shutdown" to "Éteindre le PC").filter { it.first != "tv" || st.get("kTvIp").trim().isNotEmpty() })
                 aRow.addView(chip(l, acts.contains(k)) { if (!acts.remove(k)) acts.add(k); render() })
         }
 
@@ -95,7 +95,7 @@ object Sleep {
             thread {
                 val r = try {
                     Net.call("POST", st.tablet() + "/sleep/set", json = JSONObject().put("pin", st.pin()).put("mode", mode).put("value", value)
-                        .put("actions", JSONArray(acts.toList())).put("jf_key", st.get("kJellyfin").trim()).toString(), timeout = 8000)
+                        .put("actions", JSONArray(acts.toList())).put("jf_key", st.get("kJellyfin").trim()).put("tv_ip", st.get("kTvIp").trim()).toString(), timeout = 8000)
                 } catch (e: Exception) { null }
                 a.runOnUiThread {
                     msg.text = if (r != null && r.ok) "Minuteur programmé. Une notification te prévient 1 minute avant." else if (r != null && r.code == 404) "Mets à jour le serveur de la tablette (Réglages, Serveur)." else "Échec (PIN ou tablette ?)"

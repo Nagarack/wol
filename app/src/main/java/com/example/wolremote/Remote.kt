@@ -44,6 +44,18 @@ object Remote {
     fun playing(st: Settings, id: String, cmd: String): Boolean = Jellyfin.post(st, "/Sessions/$id/Playing/$cmd").ok
     fun command(st: Settings, id: String, cmd: String): Boolean = Jellyfin.post(st, "/Sessions/$id/Command/$cmd").ok
     // Commande avec arguments (volume, piste audio, saisie au clavier…)
+    // Touches de la télé Samsung (volume, muet, extinction) via la tablette ; renvoie null si OK, sinon le message d'erreur
+    fun tvKeys(st: Settings, keys: List<String>): String? {
+        val ip = st.get("kTvIp").trim()
+        if (ip.isEmpty()) return "Renseigne l'adresse IP de la télé dans Réglages."
+        return try {
+            val r = Net.call("POST", st.tablet() + "/tv/key", json = JSONObject().put("pin", st.pin()).put("ip", ip).put("keys", JSONArray(keys)).toString(), timeout = 45000)
+            if (r.code == 404) "Mets à jour le serveur de la tablette (Réglages, Serveur)."
+            else if (!r.ok) "Tablette : HTTP " + r.code
+            else JSONObject(r.body).let { if (it.optBoolean("ok")) null else it.optString("message") }
+        } catch (e: Exception) { "Tablette injoignable" }
+    }
+
     fun commandArgs(st: Settings, id: String, name: String, args: JSONObject): Boolean =
         Jellyfin.postJson(st, "/Sessions/$id/Command", JSONObject().put("Name", name).put("Arguments", args).toString()).ok
     fun seek(st: Settings, id: String, ticks: Long): Boolean =
@@ -133,6 +145,7 @@ object RemoteUi {
 
     private fun card(a: Activity, st: Settings, x: Remote.Sess): LinearLayout {
         val c = a.card()
+        var cur = x   // dernier état connu : les boutons ±30 s partent de la position actuelle
         fun go(f: () -> Boolean) { thread { try { f() } catch (e: Exception) { } } }
         fun bt(lbl: String, f: () -> Boolean): android.widget.Button = a.btn2(lbl, Pal.FG, 44) { go(f) }
         fun row(vararg b: android.widget.Button): LinearLayout {
@@ -171,15 +184,15 @@ object RemoteUi {
         val playBtn = bt("⏯") { Remote.playing(st, x.id, "PlayPause") }
         playBox.addView(row(
             bt("⏮") { Remote.playing(st, x.id, "PreviousTrack") },
-            bt("−30 s") { Remote.seek(st, x.id, x.pos - 300000000L) },
+            bt("−30 s") { Remote.seek(st, x.id, cur.pos - 300000000L) },
             playBtn,
-            bt("+30 s") { Remote.seek(st, x.id, x.pos + 300000000L) },
+            bt("+30 s") { Remote.seek(st, x.id, cur.pos + 300000000L) },
             bt("⏭") { Remote.playing(st, x.id, "NextTrack") }
         ))
         playBox.addView(row(
-            bt("−10 min") { Remote.seek(st, x.id, x.pos - 6000000000L) },
+            bt("−10 min") { Remote.seek(st, x.id, cur.pos - 6000000000L) },
             a.btn2("Arrêter", Pal.RED, 44) { go { Remote.playing(st, x.id, "Stop") } },
-            bt("+10 min") { Remote.seek(st, x.id, x.pos + 6000000000L) }
+            bt("+10 min") { Remote.seek(st, x.id, cur.pos + 6000000000L) }
         ))
         c.addView(playBox)
 
@@ -201,20 +214,38 @@ object RemoteUi {
         val trackRow = row(tracks("Audio", "Audio", x.audio, "SetAudioStreamIndex"), tracks("Subtitle", "Sous-titres", x.sub, "SetSubtitleStreamIndex"))
         c.addView(trackRow)
 
-        // Volume
+        // Volume : par la télé Samsung si son adresse est renseignée (l'appli Jellyfin de la télé ne règle pas le volume du téléviseur)
+        val tv = st.get("kTvIp").trim().isNotEmpty()
         var dragVol = false
-        val volBar = bar(a, 100, { p -> go { Remote.commandArgs(st, x.id, "SetVolume", JSONObject().put("Volume", p.toString())) } }, { dragVol = it })
-        val volRow = LinearLayout(a)
-        volRow.orientation = LinearLayout.HORIZONTAL
-        volRow.gravity = android.view.Gravity.CENTER_VERTICAL
-        volRow.setPadding(0, a.dp(10), 0, 0)
-        volRow.addView(a.tv("Volume", 13f, Pal.MUTED))
-        volRow.addView(volBar, LinearLayout.LayoutParams(0, WRAP, 1f))
         val mute = a.btn2("Muet", Pal.FG, 40) { go { Remote.command(st, x.id, "ToggleMute") } }
-        mute.layoutParams = LinearLayout.LayoutParams(WRAP, WRAP)
-        volRow.addView(mute)
-        c.addView(volRow)
-        c.addView(row(bt("Vol −") { Remote.command(st, x.id, "VolumeDown") }, bt("Vol +") { Remote.command(st, x.id, "VolumeUp") }))
+        val volBar = bar(a, 100, { p -> go { Remote.commandArgs(st, x.id, "SetVolume", JSONObject().put("Volume", p.toString())) } }, { dragVol = it })
+        if (tv) {
+            fun tvk(vararg k: String): () -> Unit = {
+                thread {
+                    val err = Remote.tvKeys(st, k.toList())
+                    if (err != null) a.runOnUiThread { android.widget.Toast.makeText(a, err, android.widget.Toast.LENGTH_LONG).show() }
+                }
+            }
+            c.addView(a.tv("Télé", 12f, Pal.MUTED).also { it.setPadding(0, a.dp(10), 0, 0) })
+            c.addView(row(a.btn2("Vol −", Pal.FG, 44) { tvk("KEY_VOLDOWN")() }, a.btn2("Vol +", Pal.FG, 44) { tvk("KEY_VOLUP")() }, a.btn2("Muet", Pal.FG, 44) { tvk("KEY_MUTE")() }))
+            c.addView(row(a.btn2("Vol −5", Pal.FG, 44) { tvk("KEY_VOLDOWN", "KEY_VOLDOWN", "KEY_VOLDOWN", "KEY_VOLDOWN", "KEY_VOLDOWN")() },
+                a.btn2("Vol +5", Pal.FG, 44) { tvk("KEY_VOLUP", "KEY_VOLUP", "KEY_VOLUP", "KEY_VOLUP", "KEY_VOLUP")() },
+                a.btn2("Éteindre la télé", Pal.RED, 44) {
+                    a.dialogBuilder().setMessage("Éteindre la télévision ?").setPositiveButton("Éteindre") { _, _ -> tvk("KEY_POWER")() }.setNegativeButton("Annuler", null).show()
+                }))
+        } else {
+            val volRow = LinearLayout(a)
+            volRow.orientation = LinearLayout.HORIZONTAL
+            volRow.gravity = android.view.Gravity.CENTER_VERTICAL
+            volRow.setPadding(0, a.dp(10), 0, 0)
+            volRow.addView(a.tv("Volume", 13f, Pal.MUTED))
+            volRow.addView(volBar, LinearLayout.LayoutParams(0, WRAP, 1f))
+            mute.layoutParams = LinearLayout.LayoutParams(WRAP, WRAP)
+            volRow.addView(mute)
+            c.addView(volRow)
+            c.addView(row(bt("Vol −") { Remote.command(st, x.id, "VolumeDown") }, bt("Vol +") { Remote.command(st, x.id, "VolumeUp") }))
+            c.addView(a.tv("Si le volume ne réagit pas, renseigne l'adresse IP de ta télé Samsung dans Réglages : le volume, le muet et l'extinction passeront par la télé elle-même.", 12f, Pal.MUTED).also { it.setPadding(0, a.dp(6), 0, 0) })
+        }
 
         // Navigation dans les menus de l'appli
         val nav = LinearLayout(a)
@@ -240,6 +271,7 @@ object RemoteUi {
 
         // Mise à jour en place (sans reconstruire la carte) : état, position, volume
         val update: (Remote.Sess) -> Unit = { s ->
+            cur = s
             state.removeAllViews()
             state.addView(a.badge(if (s.title.isEmpty()) "Rien en lecture" else if (s.paused) "En pause" else "En lecture", if (s.title.isEmpty()) Pal.MUTED else if (s.paused) Pal.AMBER else Pal.GREEN))
             ttl.text = s.title
@@ -248,7 +280,7 @@ object RemoteUi {
             trackRow.visibility = if (s.title.isEmpty()) android.view.View.GONE else android.view.View.VISIBLE
             if (!dragPos && s.run > 0) { seek.progress = (s.pos * 1000 / s.run).toInt(); time.text = hms(s.pos) + " / " + hms(s.run) }
             if (!dragVol && s.vol >= 0) volBar.progress = s.vol
-            mute.text = if (s.muted) "Son" else "Muet"
+            if (!tv) mute.text = if (s.muted) "Son" else "Muet"
         }
         update(x)
         updaters[x.id] = update
