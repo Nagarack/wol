@@ -78,7 +78,7 @@ object RemoteUi {
         list.orientation = LinearLayout.VERTICAL
         body.addView(list)
         var alive = true
-        a.bigDialog("Télécommande", body) { alive = false }
+        a.bigDialog("Télécommande", body, "Fermer", false) { alive = false }
         thread {
             var sig = ""
             while (alive) {
@@ -86,7 +86,7 @@ object RemoteUi {
                     val s = Remote.sessions(st)
                     val ns = s.joinToString("|") { it.id + it.title + it.paused }
                     a.runOnUiThread {
-                        info.text = if (s.isEmpty()) "Aucun appareil pilotable." + (if (Remote.skipped.isNotEmpty()) "\nJellyfin voit, sans pouvoir les piloter : " + Remote.skipped.joinToString(", ") + "." else "\nJellyfin ne voit aucune session récente : ouvre l'appli Jellyfin sur la télévision, connectée à ton compte, sur l'écran d'accueil.") else "Appareils connectés"
+                        info.text = if (s.isEmpty()) "Aucun appareil pilotable." + (if (Remote.skipped.isNotEmpty()) "\nJellyfin voit, sans pouvoir les piloter : " + Remote.skipped.joinToString(", ") + ".\n\nLa télé est probablement en veille ou l'appli est fermée : allume la télé, ouvre Jellyfin et reste sur son écran d'accueil, puis ouvre à nouveau la télécommande." else "\nJellyfin ne voit aucune session récente : ouvre l'appli Jellyfin sur la télévision, connectée à ton compte, sur l'écran d'accueil.") else "Appareils connectés"
                         if (ns != sig) {
                             sig = ns
                             list.removeAllViews()

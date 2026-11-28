@@ -249,14 +249,14 @@ fun Activity.mediaCard(imgUrl: String, wDp: Int, hDp: Int, title: String, badges
 }
 
 // Fenêtre presque plein écran avec défilement
-fun Activity.bigDialog(title: String, body: LinearLayout, close: String = "Fermer", onClose: (() -> Unit)? = null): AlertDialog {
+fun Activity.bigDialog(title: String, body: LinearLayout, close: String = "Fermer", full: Boolean = true, onClose: (() -> Unit)? = null): AlertDialog {
     body.setPadding(dp(16), dp(8), dp(16), dp(8))
     val sv = android.widget.ScrollView(this)
     sv.addView(body)
     val b = dialogBuilder().setTitle(title).setView(sv).setPositiveButton(close) { _, _ -> onClose?.invoke() }
     if (onClose != null) b.setOnDismissListener { onClose() }
     val d = b.show()
-    d.window?.setLayout((resources.displayMetrics.widthPixels * 0.96).toInt(), (resources.displayMetrics.heightPixels * 0.9).toInt())
+    d.window?.setLayout((resources.displayMetrics.widthPixels * 0.96).toInt(), if (full) (resources.displayMetrics.heightPixels * 0.9).toInt() else WRAP)
     return d
 }
 
