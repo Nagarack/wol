@@ -597,6 +597,7 @@ object LibraryUi5 {
             "date" -> l.sortedByDescending { it.str("date") }
             else -> l
         }
+        lateinit var showRef: (List<JSONObject>) -> Unit
         fun show(l0: List<JSONObject>) {
             lastL = l0
             val l = sorted(l0.filter { o ->
@@ -715,7 +716,6 @@ object LibraryUi5 {
             }
         }
 
-        lateinit var showRef: (List<JSONObject>) -> Unit
         fun sortRender() {
             sortRow.removeAllViews()
             val add2 = LinearLayout.LayoutParams(WRAP, WRAP)
